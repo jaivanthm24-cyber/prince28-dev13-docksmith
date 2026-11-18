@@ -2,6 +2,7 @@
 
 import json
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
@@ -10,6 +11,7 @@ from docksmith.api.errors import register_error_handlers
 from docksmith.api.middleware import request_context
 from docksmith.api.routes import documents, health
 from docksmith.config import Settings, get_settings
+from docksmith.db.session import make_engine, make_sessionmaker
 from docksmith.logging_setup import setup_logging
 from docksmith.store import RecordStore
 
@@ -22,13 +24,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     store = RecordStore(settings.data_file)
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
             count = store.load()
             logger.info("records loaded", extra={"records": count})
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             logger.error("could not load records: %s", exc)
-        yield
+
+        engine = make_engine(settings)
+        app.state.engine = engine
+        app.state.sessionmaker = make_sessionmaker(engine)
+        try:
+            yield
+        finally:
+            await engine.dispose()
 
     app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
