@@ -1,0 +1,111 @@
+[
+    {
+        "id": "001",
+        "topic_id": "multi-stage-builds",
+        "title": "Multi-Stage Builds",
+        "category": "build",
+        "doc_type": "guide",
+        "official_doc_url": "https://docs.docker.com/build/building/multi-stage/",
+        "summary": "Multi-stage builds allow using multiple FROM instructions in a single Dockerfile. Each stage begins a fresh image and can selectively copy artifacts from earlier builder stages using COPY --from=stage.",
+        "best_practices": [
+            "Use early stages for build toolchains and compilers",
+            "Copy only compiled binaries or isolated virtualenvs into the final runtime stage",
+            "Name build stages with AS <name> for readability",
+            "Leverage BuildKit parallel DAG execution"
+        ],
+        "common_mistakes": [
+            "Leaving build SDKs (gcc, make) in the final production runtime",
+            "Failing to name stages leading to brittle numeric indices"
+        ],
+        "hadolint_rules": [
+            "DL3006"
+        ]
+    },
+    {
+        "id": "002",
+        "topic_id": "cmd-vs-entrypoint",
+        "title": "CMD vs ENTRYPOINT Instructions",
+        "category": "reference",
+        "doc_type": "reference",
+        "official_doc_url": "https://docs.docker.com/reference/dockerfile/#entrypoint",
+        "summary": "ENTRYPOINT specifies the permanent executable a container runs, while CMD specifies default arguments that can be overridden at runtime. Always use the exec form (JSON array) rather than shell form.",
+        "best_practices": [
+            "Use exec form JSON array: ENTRYPOINT [\"executable\", \"param1\"]",
+            "Use CMD to provide sensible overridable defaults",
+            "Ensure PID 1 receives POSIX signals (SIGTERM) for graceful container shutdown"
+        ],
+        "common_mistakes": [
+            "Using shell form which wraps command in /bin/sh -c and prevents signal propagation",
+            "Confusing overridability of CMD with ENTRYPOINT"
+        ],
+        "hadolint_rules": [
+            "DL3025"
+        ]
+    },
+    {
+        "id": "003",
+        "topic_id": "compose-spec-version",
+        "title": "Compose Specification and Obsolete Version Key",
+        "category": "compose",
+        "doc_type": "specification",
+        "official_doc_url": "https://docs.docker.com/compose/compose-file/04-version-and-name/",
+        "summary": "Under the modern Compose Specification (compose.yaml), the top-level version: attribute is obsolete and ignored by Compose V2. Filename conventions prefer compose.yaml.",
+        "best_practices": [
+            "Name files compose.yaml or compose.yml",
+            "Omit the top-level version: attribute entirely",
+            "Use modern 'docker compose' CLI command instead of legacy python 'docker-compose'"
+        ],
+        "common_mistakes": [
+            "Retaining obsolete version: '3.8' which produces deprecation warnings",
+            "Using legacy docker-compose v1 CLI tool"
+        ],
+        "hadolint_rules": [
+            "COMPOSE01"
+        ]
+    },
+    {
+        "id": "004",
+        "topic_id": "python-fastapi-optimization",
+        "title": "Python & FastAPI Dockerfile Optimization",
+        "category": "build",
+        "doc_type": "best-practice",
+        "official_doc_url": "https://docs.docker.com/build/cache/optimize/",
+        "summary": "Optimizing Python Dockerfiles requires layer reordering (copy requirements.txt before source code), selecting slim base images, using BuildKit cache mounts for pip, and enforcing non-root execution.",
+        "best_practices": [
+            "Use python:3.12-slim-bookworm instead of full bloated python:3.12 base",
+            "Copy dependency manifests first to maximize Docker layer cache hits",
+            "Use --mount=type=cache,target=/root/.cache/pip with BuildKit",
+            "Create and switch to non-root user (USER 10001:10001)"
+        ],
+        "common_mistakes": [
+            "COPY . . before pip install, breaking layer cache on every code change",
+            "Running containers as root (UID 0)",
+            "Leaving apt package lists and pip cache in image layers"
+        ],
+        "hadolint_rules": [
+            "DL3002",
+            "DL3008",
+            "DL3013",
+            "DL3042"
+        ]
+    },
+    {
+        "id": "005",
+        "topic_id": "storage-mount-types",
+        "title": "Storage Mount Types: Bind, Volume, tmpfs",
+        "category": "engine",
+        "doc_type": "guide",
+        "official_doc_url": "https://docs.docker.com/storage/",
+        "summary": "Docker supports three storage types: bind mounts (host filesystem paths, ideal for dev live reload), named volumes (managed storage in /var/lib/docker/volumes/, best for databases), and tmpfs (in-memory, ideal for secrets).",
+        "best_practices": [
+            "Use named volumes for persistent production database state",
+            "Use bind mounts for local development source code mounting",
+            "Use tmpfs mounts for ephemeral sensitive credentials"
+        ],
+        "common_mistakes": [
+            "Using bind mounts for production databases across differing host OS filesystems",
+            "Storing state in container writable layers leading to disk bloat and data loss"
+        ],
+        "hadolint_rules": []
+    }
+]
