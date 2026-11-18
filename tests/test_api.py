@@ -1,6 +1,9 @@
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
+from sqlalchemy.exc import ArgumentError
 
+from docksmith.api.deps import get_session
 from docksmith.api.main import create_app
 from docksmith.config import Settings
 
@@ -29,6 +32,31 @@ def test_ready_endpoint(client):
 
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
+
+
+def test_ready_returns_503_when_records_missing() -> None:
+    class _EmptyResult:
+        def scalar_one(self) -> int:
+            return 0
+
+    class _EmptySession:
+        async def execute(self, _stmt) -> _EmptyResult:
+            return _EmptyResult()
+
+    async def _override_session():
+        yield _EmptySession()
+
+    app = create_app(
+        Settings(
+            app_name="docksmith",
+            app_env="ci",
+            log_level="WARNING",
+        )
+    )
+    app.dependency_overrides[get_session] = _override_session
+    res = TestClient(app).get("/ready")
+    assert res.status_code == 503
+    assert res.json()["status"] == "not_ready"
 
 
 def test_list_documents(client):
@@ -67,3 +95,8 @@ def test_get_document_by_internal_id(client):
     assert response.status_code == 200
     assert response.json()["id"] == "001"
     assert response.json()["topic_id"] == "multi-stage-builds"
+
+
+def test_settings_rejects_empty_database_url() -> None:
+    with pytest.raises((ValidationError, ValueError, ArgumentError)):
+        Settings(_env_file=None, database_url="")
