@@ -8,9 +8,12 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.163.1",
-    "pydantic-settings>=2.16.3",
-    "uvicorn[standard]>=0.54.0",
+    "alembic>=1.14.0",
+    "asyncpg>=0.30.0",
+    "fastapi>=0.115.0",
+    "pydantic-settings>=2.6.0",
+    "sqlalchemy[asyncio]>=2.0.35",
+    "uvicorn[standard]>=0.32.0",
 ]
 
 [build-system]
@@ -30,9 +33,11 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["migrations"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["B008"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
