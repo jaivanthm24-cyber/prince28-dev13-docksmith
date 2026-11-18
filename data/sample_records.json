@@ -1,0 +1,402 @@
+[
+    {
+        "id": "001",
+        "topic_id": "multi-stage-builds",
+        "title": "Multi-Stage Builds",
+        "category": "build",
+        "doc_type": "guide",
+        "official_doc_url": "https://docs.docker.com/build/building/multi-stage/",
+        "summary": "Multi-stage builds allow using multiple FROM instructions in a single Dockerfile. Each stage begins a fresh image and can selectively copy artifacts from earlier builder stages using COPY --from=stage.",
+        "best_practices": [
+            "Use early stages for build toolchains and compilers",
+            "Copy only compiled binaries or isolated virtualenvs into the final runtime stage",
+            "Name build stages with AS <name> for readability",
+            "Leverage BuildKit parallel DAG execution"
+        ],
+        "common_mistakes": [
+            "Leaving build SDKs (gcc, make) in the final production runtime",
+            "Failing to name stages leading to brittle numeric indices"
+        ],
+        "hadolint_rules": [
+            "DL3006"
+        ]
+    },
+    {
+        "id": "002",
+        "topic_id": "cmd-vs-entrypoint",
+        "title": "CMD vs ENTRYPOINT Instructions",
+        "category": "reference",
+        "doc_type": "reference",
+        "official_doc_url": "https://docs.docker.com/reference/dockerfile/#entrypoint",
+        "summary": "ENTRYPOINT specifies the permanent executable a container runs, while CMD specifies default arguments that can be overridden at runtime. Always use the exec form (JSON array) rather than shell form.",
+        "best_practices": [
+            "Use exec form JSON array: ENTRYPOINT [\"executable\", \"param1\"]",
+            "Use CMD to provide sensible overridable defaults",
+            "Ensure PID 1 receives POSIX signals (SIGTERM) for graceful container shutdown"
+        ],
+        "common_mistakes": [
+            "Using shell form which wraps command in /bin/sh -c and prevents signal propagation",
+            "Confusing overridability of CMD with ENTRYPOINT"
+        ],
+        "hadolint_rules": [
+            "DL3025"
+        ]
+    },
+    {
+        "id": "003",
+        "topic_id": "compose-spec-version",
+        "title": "Compose Specification and Obsolete Version Key",
+        "category": "compose",
+        "doc_type": "specification",
+        "official_doc_url": "https://docs.docker.com/compose/compose-file/04-version-and-name/",
+        "summary": "Under the modern Compose Specification (compose.yaml), the top-level version: attribute is obsolete and ignored by Compose V2. Filename conventions prefer compose.yaml.",
+        "best_practices": [
+            "Name files compose.yaml or compose.yml",
+            "Omit the top-level version: attribute entirely",
+            "Use modern 'docker compose' CLI command instead of legacy python 'docker-compose'"
+        ],
+        "common_mistakes": [
+            "Retaining obsolete version: '3.8' which produces deprecation warnings",
+            "Using legacy docker-compose v1 CLI tool"
+        ],
+        "hadolint_rules": [
+            "COMPOSE01"
+        ]
+    },
+    {
+        "id": "004",
+        "topic_id": "python-fastapi-optimization",
+        "title": "Python & FastAPI Dockerfile Optimization",
+        "category": "build",
+        "doc_type": "best-practice",
+        "official_doc_url": "https://docs.docker.com/build/cache/optimize/",
+        "summary": "Optimizing Python Dockerfiles requires layer reordering (copy requirements.txt before source code), selecting slim base images, using BuildKit cache mounts for pip, and enforcing non-root execution.",
+        "best_practices": [
+            "Use python:3.12-slim-bookworm instead of full bloated python:3.12 base",
+            "Copy dependency manifests first to maximize Docker layer cache hits",
+            "Use --mount=type=cache,target=/root/.cache/pip with BuildKit",
+            "Create and switch to non-root user (USER 10001:10001)"
+        ],
+        "common_mistakes": [
+            "COPY . . before pip install, breaking layer cache on every code change",
+            "Running containers as root (UID 0)",
+            "Leaving apt package lists and pip cache in image layers"
+        ],
+        "hadolint_rules": [
+            "DL3002",
+            "DL3008",
+            "DL3013",
+            "DL3042"
+        ]
+    },
+    {
+        "id": "005",
+        "topic_id": "storage-mount-types",
+        "title": "Storage Mount Types: Bind, Volume, tmpfs",
+        "category": "engine",
+        "doc_type": "guide",
+        "official_doc_url": "https://docs.docker.com/storage/",
+        "summary": "Docker supports three storage types: bind mounts (host filesystem paths, ideal for dev live reload), named volumes (managed storage in /var/lib/docker/volumes/, best for databases), and tmpfs (in-memory, ideal for secrets).",
+        "best_practices": [
+            "Use named volumes for persistent production database state",
+            "Use bind mounts for local development source code mounting",
+            "Use tmpfs mounts for ephemeral sensitive credentials"
+        ],
+        "common_mistakes": [
+            "Using bind mounts for production databases across differing host OS filesystems",
+            "Storing state in container writable layers leading to disk bloat and data loss"
+        ],
+        "hadolint_rules": []
+    },
+    {
+        "id": "006",
+        "topic_id": "container-exit-codes",
+        "title": "Container Exit Codes and Restart Forensics",
+        "category": "engine",
+        "doc_type": "guide",
+        "official_doc_url": "https://docs.docker.com/engine/reference/commandline/inspect/",
+        "summary": "When a container restarts unexpectedly, docker inspect --format='{{json .State}}' reveals the exit code. Exit Code 137 indicates SIGKILL (often Linux kernel OOMKilled), Exit 143 indicates SIGTERM, and healthcheck failures trigger restart policies.",
+        "best_practices": [
+            "Inspect container State.OOMKilled boolean via docker inspect",
+            "Review host kernel ring buffer with dmesg -T | grep -i oom",
+            "Configure memory reservation and resource limits in compose.yaml"
+        ],
+        "common_mistakes": [
+            "Assuming application crashed when it was actually killed by host kernel OOM killer",
+            "Missing restart policy loops caused by failing healthchecks"
+        ],
+        "hadolint_rules": []
+    },
+    {
+        "id": "007",
+        "topic_id": "deprecated-maintainer",
+        "title": "Deprecated Instructions: MAINTAINER",
+        "category": "reference",
+        "doc_type": "reference",
+        "official_doc_url": "https://docs.docker.com/reference/dockerfile/#maintainer-deprecated",
+        "summary": "The MAINTAINER instruction is deprecated in favor of LABEL maintainer='...'. Labels provide generic key-value metadata that can be queried and indexed cleanly.",
+        "best_practices": [
+            "Use LABEL maintainer=\"Your Name <email@example.com>\"",
+            "Use standard OCI image annotations: LABEL org.opencontainers.image.authors=\"...\""
+        ],
+        "common_mistakes": [
+            "Continuing to use obsolete MAINTAINER instruction which triggers linter errors"
+        ],
+        "hadolint_rules": [
+            "DEPR01"
+        ]
+    },
+    {
+        "id": "008",
+        "topic_id": "buildkit-cache-mounts",
+        "title": "BuildKit Cache Mounts for Package Managers",
+        "category": "build",
+        "doc_type": "best-practice",
+        "official_doc_url": "https://docs.docker.com/build/cache/optimize/#use-cache-mounts",
+        "summary": "BuildKit syntax frontend allows mounting persistent cache directories during build execution using RUN --mount=type=cache,target=.... This preserves package manager downloads across builds without bloating layers.",
+        "best_practices": [
+            "Include # syntax=docker/dockerfile:1.7 at top of Dockerfile",
+            "Mount /root/.cache/pip for Python pip installations",
+            "Mount /var/cache/apt and /var/lib/apt for apt-get package installs"
+        ],
+        "common_mistakes": [
+            "Using standard RUN without cache mounts forcing repeated wheel downloads over internet"
+        ],
+        "hadolint_rules": [
+            "BUILDKIT01"
+        ]
+    },
+    {
+        "id": "009",
+        "topic_id": "non-root-user",
+        "title": "Non-Root User Container Execution",
+        "category": "security",
+        "doc_type": "best-practice",
+        "official_doc_url": "https://docs.docker.com/engine/security/#general-guidelines",
+        "summary": "Running container processes as root (UID 0) presents critical privilege escalation hazards if a container breakout occurs. Always create an unprivileged user and declare USER <uid>:<gid>.",
+        "best_practices": [
+            "Create system user with explicit high UID/GID (e.g. groupadd -g 10001 app && useradd -u 10001 -g app app)",
+            "Switch to USER 10001:10001 before ENTRYPOINT or CMD",
+            "Use COPY --chown=10001:10001 to assign file ownership"
+        ],
+        "common_mistakes": [
+            "Omitting USER instruction leaving container running as root (Hadolint DL3002)",
+            "Using chown in a separate RUN layer which duplicates files and doubles image size"
+        ],
+        "hadolint_rules": [
+            "DL3002"
+        ]
+    },
+    {
+        "id": "010",
+        "topic_id": "base-image-selection",
+        "title": "Base Image Selection: Slim vs Alpine vs Distroless",
+        "category": "build",
+        "doc_type": "guide",
+        "official_doc_url": "https://docs.docker.com/build/building/best-practices/#use-official-images",
+        "summary": "Choosing the right base image balances size, compatibility, and security. Debian slim images (-slim-bookworm) offer glibc compatibility, Alpine uses musl libc, and Distroless eliminates shells and package managers entirely.",
+        "best_practices": [
+            "Use python:3.12-slim-bookworm for standard Python projects to avoid musl C-extension build issues",
+            "Use gcr.io/distroless/static for statically compiled Go or Rust binaries",
+            "Pin explicit image tags rather than using latest"
+        ],
+        "common_mistakes": [
+            "Using default full distribution base images which add 800+ MB of unnecessary tools",
+            "Using :latest tag which causes non-deterministic builds"
+        ],
+        "hadolint_rules": [
+            "DL3007"
+        ]
+    },
+    {
+        "id": "011",
+        "topic_id": "dockerignore-syntax",
+        "title": ".dockerignore Syntax and Build Context Optimization",
+        "category": "build",
+        "doc_type": "reference",
+        "official_doc_url": "https://docs.docker.com/build/building/context/#dockerignore-files",
+        "summary": "The .dockerignore file excludes files and directories from the Docker build context. This prevents sending unnecessary git histories, virtual environments, local secrets, and caches to the Docker daemon.",
+        "best_practices": [
+            "Always include .git, .env, .venv, and node_modules in .dockerignore",
+            "Keep the build context minimal to speed up initial transfer times",
+            "Use wildcards and negation patterns (!file) to strictly allow only required artifacts"
+        ],
+        "common_mistakes": [
+            "Missing .dockerignore resulting in multi-gigabyte build context uploads",
+            "Accidentally leaking production .env files into image layers"
+        ],
+        "hadolint_rules": []
+    },
+    {
+        "id": "012",
+        "topic_id": "hadolint-dl3008",
+        "title": "Hadolint DL3008: Pin apt-get Package Versions",
+        "category": "linting",
+        "doc_type": "rule",
+        "official_doc_url": "https://docs.docker.com/build/building/best-practices/#apt-get",
+        "summary": "Hadolint rule DL3008 advises pinning versions in apt-get install and always passing --no-install-recommends. This prevents uncontrolled upstream upgrades and prevents installing hundreds of megabytes of documentation.",
+        "best_practices": [
+            "Pass --no-install-recommends to apt-get install",
+            "Combine apt-get update && apt-get install in the same RUN layer",
+            "Pin critical package versions where deterministic reproducibility is required"
+        ],
+        "common_mistakes": [
+            "Running apt-get update in a separate layer which gets cached indefinitely",
+            "Installing recommended and suggested packages unintentionally"
+        ],
+        "hadolint_rules": [
+            "DL3008"
+        ]
+    },
+    {
+        "id": "013",
+        "topic_id": "hadolint-dl3009",
+        "title": "Hadolint DL3009: Clean Up Apt Lists",
+        "category": "linting",
+        "doc_type": "rule",
+        "official_doc_url": "https://docs.docker.com/build/building/best-practices/#apt-get",
+        "summary": "Hadolint rule DL3009 requires deleting the apt-get cache lists after installing packages. The command rm -rf /var/lib/apt/lists/* must be executed in the exact same RUN instruction.",
+        "best_practices": [
+            "Append && rm -rf /var/lib/apt/lists/* to apt-get install commands",
+            "Chain commands with backslashes in a single RUN instruction"
+        ],
+        "common_mistakes": [
+            "Running rm -rf /var/lib/apt/lists/* in a subsequent RUN layer, which does not shrink previous layer"
+        ],
+        "hadolint_rules": [
+            "DL3009"
+        ]
+    },
+    {
+        "id": "014",
+        "topic_id": "hadolint-dl3013",
+        "title": "Hadolint DL3013 / DL3042: Avoid Pip Cache Bloat",
+        "category": "linting",
+        "doc_type": "rule",
+        "official_doc_url": "https://docs.docker.com/build/cache/optimize/#use-cache-mounts",
+        "summary": "Hadolint DL3013 and DL3042 require avoiding pip cache bloat in image layers. Use pip install --no-cache-dir or BuildKit cache mounts to prevent storing tarballs inside the final image.",
+        "best_practices": [
+            "Use pip install --no-cache-dir -r requirements.txt",
+            "Or use BuildKit RUN --mount=type=cache,target=/root/.cache/pip",
+            "Pin dependency package versions in requirements.txt"
+        ],
+        "common_mistakes": [
+            "Default pip install leaving hundreds of megabytes of wheels in /root/.cache"
+        ],
+        "hadolint_rules": [
+            "DL3013",
+            "DL3042"
+        ]
+    },
+    {
+        "id": "015",
+        "topic_id": "hadolint-dl3020",
+        "title": "Hadolint DL3020: Use COPY Instead of ADD",
+        "category": "linting",
+        "doc_type": "rule",
+        "official_doc_url": "https://docs.docker.com/reference/dockerfile/#add",
+        "summary": "Hadolint rule DL3020 mandates using COPY instead of ADD for copying local files and directories. ADD has implicit archive auto-extraction and remote URL fetching behaviors that can cause unexpected bugs.",
+        "best_practices": [
+            "Always use COPY for local application source code and configuration files",
+            "Reserve ADD only for automatic tar archive unpacking into the image"
+        ],
+        "common_mistakes": [
+            "Using ADD for local directories which inflates complexity and risks unexpected decompression"
+        ],
+        "hadolint_rules": [
+            "DL3020"
+        ]
+    },
+    {
+        "id": "016",
+        "topic_id": "hadolint-dl3025",
+        "title": "Hadolint DL3025: JSON Exec Notation for CMD/ENTRYPOINT",
+        "category": "linting",
+        "doc_type": "rule",
+        "official_doc_url": "https://docs.docker.com/reference/dockerfile/#cmd",
+        "summary": "Hadolint DL3025 checks that CMD and ENTRYPOINT arguments use JSON array notation ([\"executable\", \"param\"]). Shell form starts an unnecessary subshell and blocks POSIX signal handling.",
+        "best_practices": [
+            "Declare: CMD [\"uvicorn\", \"main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]",
+            "Avoid string shell form: CMD uvicorn main:app"
+        ],
+        "common_mistakes": [
+            "Using shell form resulting in containers hanging for 10 seconds before being forcefully killed (SIGKILL) on shutdown"
+        ],
+        "hadolint_rules": [
+            "DL3025"
+        ]
+    },
+    {
+        "id": "017",
+        "topic_id": "compose-healthcheck",
+        "title": "Compose Specification Healthcheck Configuration",
+        "category": "compose",
+        "doc_type": "specification",
+        "official_doc_url": "https://docs.docker.com/compose/compose-file/compose-file-v2/#healthcheck",
+        "summary": "Compose healthchecks declare how Docker monitors service readiness and availability. A failing healthcheck triggers dependency ordering conditions (depends_on: service_healthy).",
+        "best_practices": [
+            "Define test commands using lightweight internal utilities (curl, python urllib, or wget)",
+            "Configure reasonable interval (30s), timeout (5s), and retries (3)",
+            "Set start_period to allow slow applications time to boot without failing checks"
+        ],
+        "common_mistakes": [
+            "Setting timeout too low resulting in false-positive container restarts",
+            "Failing to set start_period on apps with database migrations"
+        ],
+        "hadolint_rules": []
+    },
+    {
+        "id": "018",
+        "topic_id": "docker-buildx",
+        "title": "Docker Buildx Multi-Platform Emulation",
+        "category": "build",
+        "doc_type": "guide",
+        "official_doc_url": "https://docs.docker.com/build/building/multi-platform/",
+        "summary": "Docker Buildx extends the Docker CLI with full BuildKit support, enabling multi-platform compilation (--platform linux/amd64,linux/arm64) using QEMU emulation or cross-compilation toolchains.",
+        "best_practices": [
+            "Create a dedicated buildx builder instance: docker buildx create --use",
+            "Use BuildKit multi-stage builds with TARGETARCH and BUILDARCH build arguments",
+            "Export cache using --cache-to type=gha or type=registry"
+        ],
+        "common_mistakes": [
+            "Building images on Apple Silicon (arm64) without targeting linux/amd64 for x86 cloud deployments"
+        ],
+        "hadolint_rules": []
+    },
+    {
+        "id": "019",
+        "topic_id": "oomkilled-diagnostics",
+        "title": "Linux Kernel Out-Of-Memory Killer Diagnostics",
+        "category": "engine",
+        "doc_type": "guide",
+        "official_doc_url": "https://docs.docker.com/config/containers/resource_constraints/",
+        "summary": "When a container consumes more memory than its limit, the Linux kernel invokes the OOM Killer to terminate processes. The container exits with code 137 and State.OOMKilled is set to true.",
+        "best_practices": [
+            "Check dmesg -T | grep -E -i 'oom|killed process' on the host",
+            "Check docker inspect <id> --format '{{.State.OOMKilled}}'",
+            "Adjust container memory limits and profiling memory usage under load"
+        ],
+        "common_mistakes": [
+            "Assuming memory leaks are network disconnects because logs terminate abruptly without error tracebacks"
+        ],
+        "hadolint_rules": []
+    },
+    {
+        "id": "020",
+        "topic_id": "rootless-docker",
+        "title": "Rootless Docker Engine Architecture",
+        "category": "security",
+        "doc_type": "guide",
+        "official_doc_url": "https://docs.docker.com/engine/security/rootless/",
+        "summary": "Rootless mode allows running the Docker daemon and containers as a non-root user to mitigate potential container breakout vulnerabilities. It uses user namespaces to map container root (UID 0) to an unprivileged host UID.",
+        "best_practices": [
+            "Use Rootless mode for multi-tenant and security-sensitive hosting environments",
+            "Ensure slirp4netns or rootlesskit is configured for user-mode networking",
+            "Combine rootless daemon with unprivileged USER directives inside Dockerfiles"
+        ],
+        "common_mistakes": [
+            "Assuming running a container as root inside rootless Docker has the same host privileges as rootful Docker"
+        ],
+        "hadolint_rules": []
+    }
+]
