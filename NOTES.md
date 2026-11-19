@@ -117,14 +117,15 @@ Verified endpoints against the PostgreSQL backend:
 
 ## 5. Automated Tests
 
-- API unit tests: 16 passed
-- PostgreSQL integration tests: 3 passed (or skipped when `TEST_DATABASE_URL` is omitted)
-- Total: 19 passed
+- API unit tests: 16 passed in 0.22s
+- PostgreSQL integration tests: 7 passed in 2.41s
+- Total: 23 passed (coverage 85% unit only, 87% full stack with fail_under = 80 enforced)
 
 Commands:
 ```bash
-uv run pytest
-TEST_DATABASE_URL="postgresql://localhost:5432/docksmith_test" uv run pytest
+make test
+make test-integration
+make cov
 ```
 
 ---
@@ -152,10 +153,10 @@ The `RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-install
 ```text
 $ docker compose ps -a
 NAME                  IMAGE                    COMMAND                  SERVICE   CREATED         STATUS                   PORTS
-docksmith-api-1       docksmith-api            "sh -c 'exec uvicorn…"   api       2 minutes ago   Up 2 minutes (healthy)   0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp
-docksmith-db-1        pgvector/pgvector:pg17   "docker-entrypoint.s…"   db        2 minutes ago   Up 2 minutes (healthy)   0.0.0.0:5433->5432/tcp, [::]:5433->5432/tcp
+docksmith-api-1       docksmith-api            "sh -c 'exec uvicorn…"   api       2 minutes ago   Up 2 minutes (healthy)   127.0.0.1:8000->8000/tcp
+docksmith-db-1        pgvector/pgvector:pg17   "docker-entrypoint.s…"   db        2 minutes ago   Up 2 minutes (healthy)   127.0.0.1:5432->5432/tcp
 docksmith-migrate-1   docksmith-migrate        "sh -c 'alembic upgr…"   migrate   2 minutes ago   Exited (0) 2 minutes ago
-docksmith-redis-1     redis:7-alpine           "docker-entrypoint.s…"   redis     2 minutes ago   Up 2 minutes (healthy)   0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp
+docksmith-redis-1     redis:7-alpine           "docker-entrypoint.s…"   redis     2 minutes ago   Up 2 minutes (healthy)   127.0.0.1:6379->6379/tcp
 
 $ docker compose logs migrate
 first up: records=20 inserted=20 updated=0 unchanged=0
@@ -166,20 +167,17 @@ after down + up: records=20 inserted=0 updated=0 unchanged=20
 
 ```text
 db stopped: /health → {"status":"ok","app":"docksmith","env":"local"}
-db stopped: /ready → {"status":"not_ready","checks":{"database":false}}
-db started: /ready → {"status":"ready","checks":{"database":true}}
+db stopped: /ready → {"status":"not_ready","checks":{"database":false}} (HTTP 503)
+db started: /ready → {"status":"ready","checks":{"database":true}} (HTTP 200)
 ```
-
-Why should a load balancer stop sending traffic here but not restart the app?
-When the database is unreachable, restarting the API process cannot fix external database downtime and would trigger unnecessary crash-loop cascades; the load balancer should instead stop routing traffic until the readiness check recovers.
 
 ### Tests and coverage
 
 ```text
-uv run poe test → 16 passed in 0.21s
-uv run poe test-integration → 7 passed in 2.25s
-coverage TOTAL, unit only → TOTAL: 82%
-coverage TOTAL, with integration tests → TOTAL: 91%
+uv run poe test → 16 passed in 0.22s
+uv run poe test-integration → 7 passed in 2.41s
+coverage TOTAL, unit only → TOTAL: 85% (passes fail_under = 80)
+coverage TOTAL, with integration tests → TOTAL: 87%
 ```
 
 Two files or lines my coverage report says are never run, and whether they matter:
