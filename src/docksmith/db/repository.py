@@ -1,10 +1,16 @@
 """All SQL for documents lives here. Endpoints never write SQL themselves."""
 
+import hashlib
+import json
 import re
+import uuid
+from datetime import date
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy import Text, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from docksmith.db.models import Document
 
@@ -88,3 +94,66 @@ class DocumentRepository:
                 select(Document).where(Document.metadata_["topic_id"].as_string() == external_id)
             )
         return to_dict(doc) if doc else None
+
+    async def get_pages(self, external_id: str) -> dict[str, Any] | None:
+        stmt = (
+            select(Document)
+            .options(selectinload(Document.pages))
+            .where(Document.external_id == external_id)
+        )
+        doc = await self.session.scalar(stmt)
+        if doc is None:
+            stmt = (
+                select(Document)
+                .options(selectinload(Document.pages))
+                .where(Document.metadata_["topic_id"].as_string() == external_id)
+            )
+            doc = await self.session.scalar(stmt)
+        if doc is None:
+            return None
+        return {
+            **to_dict(doc),
+            "pages": [
+                {"page_no": p.page_no, "text": p.text}
+                for p in sorted(doc.pages, key=lambda p: p.page_no)
+            ],
+        }
+
+    async def create(self, data: dict[str, Any]) -> dict[str, Any]:
+        ext_id = str(data.get("id") or uuid.uuid4().hex[:8])
+        existing = await self.session.scalar(select(Document).where(Document.external_id == ext_id))
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Document with id '{ext_id}' already exists.",
+            )
+
+        metadata = data.get("metadata", {})
+        title = data.get("title") or ext_id
+        canonical = json.dumps(
+            {"id": ext_id, "title": title, **metadata},
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        sha = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+        published = data.get("published_on")
+        pub_date = None
+        if published:
+            pub_date = date.fromisoformat(published) if isinstance(published, str) else published
+
+        doc = Document(
+            external_id=ext_id,
+            title=title,
+            doc_type=data.get("doc_type", "record"),
+            source_url=data.get("source_url"),
+            licence=data.get("licence"),
+            published_on=pub_date,
+            sha256=sha,
+            metadata_=metadata,
+        )
+        self.session.add(doc)
+        await self.session.commit()
+        await self.session.refresh(doc)
+        return to_dict(doc)
