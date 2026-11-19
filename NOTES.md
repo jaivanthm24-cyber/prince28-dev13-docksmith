@@ -1,112 +1,128 @@
-# Day 3 — PostgreSQL Migration Notes: DockSmith
+# Engineering notes: DockSmith
 
-## 1. Database Connection
+## D03 · PostgreSQL
 
-- Database: Dedicated PostgreSQL 16 (PostgreSQL 16.16 on x86_64 Alpine Linux, localhost:5432)
-- Driver: asyncpg (`postgresql+asyncpg://`)
-- ORM: SQLAlchemy 2.0 async sessions
-- Connection Pool: `AsyncAdaptedQueuePool` with `pool_pre_ping=True`
-- Migrations: Alembic 1.14.0 with async engine runner
+### Migrations (upgrade, downgrade, upgrade)
 
-## 2. Database Migrations
-
-Two migrations were created and successfully applied to `docksmith` database:
-
-- `cc17e2451ac1`: Create `documents` and `pages` tables with primary keys, unique constraints, foreign keys (`ON DELETE CASCADE`), positive page check constraint, and indexes.
-- `069afa2de3a0`: Add GIN index `ix_documents_metadata_gin` on `documents.metadata` using `jsonb_path_ops`.
-
-Verified migration operations:
-- `uv run alembic upgrade head` -> applied both migrations.
-- `uv run alembic downgrade -1` -> rolled back GIN index cleanly.
-- `uv run alembic upgrade head` -> re-applied to head revision.
-- Current migration: `069afa2de3a0 (head)`
-
-## 3. Idempotent Loader Evidence
-
-The data loader (`scripts/load_db.py`) was executed multiple times against `data/sample_records.json`:
-
-### First Execution (Initial Seed)
 ```text
-records=20 inserted=20 updated=0 unchanged=0 pages_synced=40
-```
-Inserted 20 documents and 40 structured pages (overview + best practices/hadolint rules).
+$ uv run alembic downgrade -1
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running downgrade 069afa2de3a0 -> cc17e2451ac1, add gin index on metadata
 
-### Second Execution (Idempotency Check)
+$ uv run alembic current
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+cc17e2451ac1
+
+$ uv run alembic upgrade head
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade cc17e2451ac1 -> 069afa2de3a0, add gin index on metadata
+
+$ uv run alembic history
+cc17e2451ac1 -> 069afa2de3a0 (head), add gin index on metadata
+<base> -> cc17e2451ac1, create documents and pages
+```
+
+### The loader is idempotent
+
 ```text
-records=20 inserted=0 updated=0 unchanged=20 pages_synced=0
-```
-Verified that identical content produces matching SHA-256 fingerprints, preventing duplicates.
+run 1:
+records=20 inserted=20 updated=0 unchanged=0
 
-### Third Execution (Mutation & Update Check)
-Verified that modifying a record's content recalculates the SHA-256 fingerprint, updates the document row in place, and synchronizes associated pages without orphan records.
+run 2:
+records=20 inserted=0 updated=0 unchanged=20
 
-## 4. API Verification
-
-Verified endpoints with live database connectivity:
-
-- `GET /health` -> `200 OK` (`{"status": "ok", "app": "docksmith", "env": "local"}`)
-- `GET /ready` -> `200 OK` (`{"status": "ready", "checks": {"database": true}}`)
-- `GET /v1/documents` -> `200 OK` (20 documents returned with pagination and filters)
-- `GET /v1/documents/001` -> `200 OK` (retrieval by external ID)
-- `GET /v1/documents/multi-stage-builds` -> `200 OK` (retrieval by topic identifier)
-- `GET /v1/documents/001/pages` -> `200 OK` (retrieval with 2 pages)
-- `POST /v1/documents` -> `201 Created` (dynamic document creation with SHA-256)
-- `POST /v1/documents` (duplicate) -> `409 Conflict` (duplicate prevention)
-- `GET /v1/documents?category=build` -> `200 OK` (JSONB metadata filter)
-- `GET /v1/documents?Bad-Name=1` -> `400 Bad Request` (RFC 9457 Problem Details)
-- `GET /v1/documents/999` -> `404 Not Found` (RFC 9457 Problem Details)
-
-## 5. Automated Tests
-
-- API unit tests (isolated with FakeRepository & dependency overrides): 20 passed
-- PostgreSQL integration tests (`tests/test_db_integration.py` against live database): 5 passed
-- Total: 25 passed in 0.88s
-
-Command:
-```bash
-uv run pytest
+run 3 (after editing one record):
+records=20 inserted=0 updated=1 unchanged=19
 ```
 
-Quality Gates:
-- `uv run ruff check .` -> All checks passed!
-- `uv run ruff format --check .` -> 27 files already formatted!
-- `uv run pre-commit run --all-files` -> All hooks passed!
+### EXPLAIN for ?topic_id=multi-stage-builds
 
-## 6. EXPLAIN ANALYZE Evidence
-
-Query:
-```sql
-EXPLAIN (ANALYZE, BUFFERS)
-SELECT external_id, title
-FROM documents
-WHERE metadata @> '{"topic_id": "multi-stage-builds"}'::jsonb;
-```
-
-### Normal Query Plan
 ```text
-Seq Scan on documents  (cost=0.00..11.00 rows=1 width=178) (actual time=0.012..0.029 rows=1 loops=1)
+$ uv run python scripts/explain.py topic_id multi-stage-builds
+
+--- Normal query plan ---
+Seq Scan on documents  (cost=0.00..3.25 rows=1 width=178) (actual time=0.019..0.019 rows=1 loops=1)
   Filter: (metadata @> '{"topic_id": "multi-stage-builds"}'::jsonb)
   Rows Removed by Filter: 19
   Buffers: shared hit=3
-Planning Time: 1.657 ms
-Execution Time: 0.049 ms
-```
+Planning:
+  Buffers: shared hit=126
+Planning Time: 0.870 ms
+Execution Time: 0.034 ms
 
-### Query Plan with Sequential Scans Disabled (`SET enable_seqscan = off`)
-```text
-Bitmap Heap Scan on documents  (cost=12.81..16.82 rows=1 width=178) (actual time=0.023..0.024 rows=1 loops=1)
+--- Query plan with sequential scans disabled ---
+Bitmap Heap Scan on documents  (cost=8.54..12.56 rows=1 width=178) (actual time=0.011..0.012 rows=1 loops=1)
   Recheck Cond: (metadata @> '{"topic_id": "multi-stage-builds"}'::jsonb)
   Heap Blocks: exact=1
-  Buffers: shared hit=4
-  ->  Bitmap Index Scan on ix_documents_metadata_gin  (cost=0.00..12.81 rows=1 width=0) (actual time=0.014..0.014 rows=1 loops=1)
+  Buffers: shared hit=3
+  ->  Bitmap Index Scan on ix_documents_metadata_gin  (cost=0.00..8.54 rows=1 width=0) (actual time=0.006..0.006 rows=1 loops=1)
         Index Cond: (metadata @> '{"topic_id": "multi-stage-builds"}'::jsonb)
-        Buffers: shared hit=3
-Planning Time: 0.070 ms
-Execution Time: 0.085 ms
+        Buffers: shared hit=2
+Planning:
+  Buffers: shared hit=1
+Planning Time: 0.046 ms
+Execution Time: 0.045 ms
 ```
 
-## 7. Engineering Understanding
+Why did the planner choose a Seq Scan on my table? (2 lines, your own words)
+With only 20 records residing in 3 shared buffer blocks, scanning all rows directly is significantly cheaper than loading and traversing the GIN index structure. The planner determines that sequential disk/buffer reading incurs less I/O overhead for tiny datasets.
 
-PostgreSQL's cost-based query optimizer chose a Sequential Scan under normal settings because the `documents` table currently holds 20 records (stored within 1 disk page). Reading a single page sequentially is significantly faster than reading the GIN index tree and subsequently reading the table page.
+When would it switch to the GIN index? (1 line)
+PostgreSQL switches to the GIN index as the table scales to hundreds or thousands of rows where the cost of a full table scan outweighs index traversal and bitmap heap lookups.
 
-When `enable_seqscan = off` is set, the optimizer utilizes the `ix_documents_metadata_gin` index via a Bitmap Index Scan and Bitmap Heap Scan. This confirms that the GIN index with `jsonb_path_ops` is correctly structured, registered in catalog metadata, and fully active for containment (`@>`) queries as dataset size scales.
+---
+
+## 1. Database Connection
+
+- Database: PostgreSQL (Neon compatible)
+- Database version: PostgreSQL 16.16
+- Driver: asyncpg (`postgresql+asyncpg://`)
+- ORM: SQLAlchemy 2.0 (asyncio)
+- Migrations: Alembic 1.14+
+
+## 2. Database Migrations
+
+Two migrations were created and successfully applied:
+- `cc17e2451ac1`: Create `documents` and `pages` tables with foreign keys and unique constraints.
+- `069afa2de3a0`: Add GIN index `ix_documents_metadata_gin` on JSONB metadata using `jsonb_path_ops`.
+
+Verified migration operations:
+- Downgrade one revision (`uv run alembic downgrade -1`)
+- Verify current revision (`uv run alembic current`)
+- Re-upgrade to head (`uv run alembic upgrade head`)
+- Inspect revision history (`uv run alembic history`)
+
+Current migration: `069afa2de3a0 (head)`
+
+## 3. Idempotent Loader Evidence
+
+The loader (`scripts/load_db.py`) hashes each record using SHA-256 and compares it against existing rows in a single atomic transaction:
+- **First execution** (cold start): `records=20 inserted=20 updated=0 unchanged=0`
+- **Second execution** (idempotency check): `records=20 inserted=0 updated=0 unchanged=20`
+- **Third execution** (single record edit): `records=20 inserted=0 updated=1 unchanged=19`
+
+## 4. API Verification
+
+Verified endpoints against the PostgreSQL backend:
+- `GET /health` -> 200 OK (liveness probe, instant, zero DB overhead)
+- `GET /ready` -> 200 OK (`{"status": "ready", "checks": {"database": true}}`)
+- `GET /ready` (with simulated DB downtime) -> 503 Service Unavailable (`{"status": "not_ready", "checks": {"database": false}}`)
+- `GET /v1/documents?limit=2` -> 200 OK (paginated items with total count)
+- `GET /v1/documents?category=build` -> 200 OK (JSONB metadata filter)
+- `GET /v1/documents/001` -> 200 OK (document lookup)
+- `GET /v1/documents?Bad-Name=1` -> 400 Bad Request (`application/problem+json`)
+
+## 5. Automated Tests
+
+- API unit tests: 16 passed
+- PostgreSQL integration tests: 3 passed (or skipped when `TEST_DATABASE_URL` is omitted)
+- Total: 19 passed
+
+Commands:
+```bash
+uv run pytest
+TEST_DATABASE_URL="postgresql://localhost:5432/docksmith_test" uv run pytest
+```
