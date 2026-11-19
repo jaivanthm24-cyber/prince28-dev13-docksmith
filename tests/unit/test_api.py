@@ -16,7 +16,36 @@ def test_ready_endpoint(client):
 
 
 def test_ready_database_down(client, monkeypatch):
-    from docksmith.api.deps import check_db
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from docksmith.api.deps import check_db, get_app_settings, get_repo, get_session
+
+    req = MagicMock()
+    req.app.state.settings = "mock_settings"
+    assert get_app_settings(req) == "mock_settings"
+
+    mock_conn = AsyncMock()
+    mock_conn.execute.return_value = "ok"
+    mock_engine = MagicMock()
+    mock_engine.connect.return_value.__aenter__.return_value = mock_conn
+    req.app.state.engine = mock_engine
+    assert asyncio.run(check_db(req)) is True
+
+    mock_engine.connect.side_effect = RuntimeError("db down")
+    assert asyncio.run(check_db(req)) is False
+
+    mock_session = AsyncMock()
+    mock_sm = MagicMock()
+    mock_sm.return_value.__aenter__.return_value = mock_session
+    req.app.state.sessionmaker = mock_sm
+
+    async def run_session():
+        async for s in get_session(req):
+            repo = await get_repo(s)
+            assert repo.session == s
+
+    asyncio.run(run_session())
 
     async def database_down():
         return False
@@ -61,6 +90,27 @@ def test_search_documents(client):
 
 
 def test_metadata_filter(client):
+    from datetime import date
+
+    from docksmith.db.models import Document
+    from docksmith.db.repository import _value_candidates, to_dict
+
+    assert True in _value_candidates("true")
+    assert False in _value_candidates("false")
+    assert 42 in _value_candidates("42")
+    assert 3.14 in _value_candidates("3.14")
+    assert "abc" in _value_candidates("abc")
+
+    doc = Document(
+        external_id="D1",
+        title="Test",
+        metadata_={"k": "v"},
+        published_on=date(2025, 1, 1),
+    )
+    d = to_dict(doc)
+    assert d["id"] == "D1"
+    assert d["k"] == "v"
+
     response = client.get("/v1/documents?category=build")
 
     assert response.status_code == 200
@@ -83,12 +133,23 @@ def test_get_document_found(client):
     assert response.status_code == 200
     assert response.json()["topic_id"] == "multi-stage-builds"
 
+    pages_resp = client.get("/v1/documents/001/pages")
+    assert pages_resp.status_code == 200
+    assert "pages" in pages_resp.json()
+
+    create_resp = client.post("/v1/documents", json={"title": "Test Create", "id": "003"})
+    assert create_resp.status_code == 201
+    assert create_resp.json()["id"] == "003"
+
 
 def test_missing_document(client):
     response = client.get("/v1/documents/999")
 
     assert response.status_code == 404
     assert response.headers["content-type"].startswith("application/problem+json")
+
+    pages_resp = client.get("/v1/documents/999/pages")
+    assert pages_resp.status_code == 404
 
 
 def test_invalid_limit(client):
@@ -108,6 +169,14 @@ def test_request_id_echoed(client):
 
     assert response.status_code == 200
     assert response.headers["X-Request-ID"] == request_id
+
+    @client.app.get("/test-500-endpoint")
+    def crash():
+        raise RuntimeError("simulated error")
+
+    resp_500 = client.get("/test-500-endpoint", headers={"X-Request-ID": "err-999"})
+    assert resp_500.status_code == 500
+    assert resp_500.headers["X-Request-ID"] == "err-999"
 
 
 def test_generated_request_id(client):
