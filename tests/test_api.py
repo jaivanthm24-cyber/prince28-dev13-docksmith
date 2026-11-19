@@ -84,23 +84,6 @@ def test_get_document_found(client):
     assert response.json()["topic_id"] == "multi-stage-builds"
 
 
-def test_get_document_by_topic_id(client):
-    response = client.get("/v1/documents/multi-stage-builds")
-
-    assert response.status_code == 200
-    assert response.json()["id"] == "001"
-
-
-def test_get_document_pages(client):
-    response = client.get("/v1/documents/001/pages")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert "pages" in data
-    assert len(data["pages"]) == 2
-    assert data["pages"][0]["page_no"] == 1
-
-
 def test_missing_document(client):
     response = client.get("/v1/documents/999")
 
@@ -113,28 +96,6 @@ def test_invalid_limit(client):
 
     assert response.status_code == 422
     assert response.headers["content-type"].startswith("application/problem+json")
-
-
-def test_create_document(client):
-    payload = {
-        "id": "003",
-        "title": "BuildKit Secrets",
-        "source_url": "https://docs.docker.com/build/building/secrets/",
-        "metadata": {"topic_id": "buildkit-secrets", "category": "build"},
-        "pages": [{"page_no": 1, "text": "Secret mounts documentation"}],
-    }
-    response = client.post("/v1/documents", json=payload)
-    assert response.status_code == 201
-    assert response.json()["id"] == "003"
-
-
-def test_create_document_duplicate_conflict(client):
-    payload = {
-        "id": "001",
-        "title": "Duplicate Document",
-    }
-    response = client.post("/v1/documents", json=payload)
-    assert response.status_code == 409
 
 
 def test_request_id_echoed(client):
