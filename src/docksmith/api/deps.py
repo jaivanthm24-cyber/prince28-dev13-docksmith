@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from docksmith.config import Settings
 from docksmith.db.repository import DocumentRepository
-from docksmith.store import RecordStore
 
 
 def get_app_settings(request: Request) -> Settings:
@@ -42,12 +41,7 @@ async def check_db(request: Request) -> bool:
         return False
 
 
-def get_store(request: Request) -> RecordStore:
-    return request.app.state.store
-
-
 SettingsDep = Annotated[Settings, Depends(get_app_settings)]
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 RepoDep = Annotated[DocumentRepository, Depends(get_repo)]
 DbCheckDep = Annotated[bool, Depends(check_db)]
-StoreDep = Annotated[RecordStore, Depends(get_store)]
