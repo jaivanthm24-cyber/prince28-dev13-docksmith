@@ -126,3 +126,61 @@ Commands:
 uv run pytest
 TEST_DATABASE_URL="postgresql://localhost:5432/docksmith_test" uv run pytest
 ```
+
+---
+
+## D04 · Docker, Compose and tests
+
+### The image
+
+```text
+$ docker images docksmith:dev
+IMAGE           ID             DISK USAGE   CONTENT SIZE   EXTRA
+docksmith:dev   2e70dc894d3d        300MB           70MB
+
+$ docker run --rm docksmith:dev id
+uid=999(app) gid=999(app) groups=999(app)
+```
+
+- Size: 300 MB (target: under 400 MB)
+- First build: 31.4 s. After changing one line of code: 2.65 s.
+- Which step said CACHED, and why?
+The `RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-install-project --no-dev` step was CACHED because `pyproject.toml` and `uv.lock` did not change, allowing BuildKit to reuse pre-installed dependencies.
+
+### The stack
+
+```text
+$ docker compose ps -a
+NAME                  IMAGE                    COMMAND                  SERVICE   CREATED         STATUS                   PORTS
+docksmith-api-1       docksmith-api            "sh -c 'exec uvicorn…"   api       2 minutes ago   Up 2 minutes (healthy)   0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp
+docksmith-db-1        pgvector/pgvector:pg17   "docker-entrypoint.s…"   db        2 minutes ago   Up 2 minutes (healthy)   0.0.0.0:5433->5432/tcp, [::]:5433->5432/tcp
+docksmith-migrate-1   docksmith-migrate        "sh -c 'alembic upgr…"   migrate   2 minutes ago   Exited (0) 2 minutes ago
+docksmith-redis-1     redis:7-alpine           "docker-entrypoint.s…"   redis     2 minutes ago   Up 2 minutes (healthy)   0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp
+
+$ docker compose logs migrate
+first up: records=20 inserted=20 updated=0 unchanged=0
+after down + up: records=20 inserted=0 updated=0 unchanged=20
+```
+
+### Breaking the database on purpose
+
+```text
+db stopped: /health → {"status":"ok","app":"docksmith","env":"local"}
+db stopped: /ready → {"status":"not_ready","checks":{"database":false}}
+db started: /ready → {"status":"ready","checks":{"database":true}}
+```
+
+Why should a load balancer stop sending traffic here but not restart the app?
+When the database is unreachable, restarting the API process cannot fix external database downtime and would trigger unnecessary crash-loop cascades; the load balancer should instead stop routing traffic until the readiness check recovers.
+
+### Tests and coverage
+
+```text
+uv run poe test → 16 passed in 0.21s
+uv run poe test-integration → 7 passed in 2.25s
+coverage TOTAL, unit only → TOTAL: 82%
+coverage TOTAL, with integration tests → TOTAL: 91%
+```
+
+Two files or lines my coverage report says are never run, and whether they matter:
+Line 40-41 in `src/docksmith/api/deps.py` handles database ping exceptions, which only run during live database outages; lines 22-24 in `src/docksmith/api/middleware.py` handle unhandled server exception formatting, which are fallback safety nets for unexpected runtime crashes.
