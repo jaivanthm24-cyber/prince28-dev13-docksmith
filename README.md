@@ -2,7 +2,7 @@
 
 A Docker and Compose expert that answers from the official Docker docs and checks every Dockerfile it suggests with a linter and a real build.
 
-**Status:** Day 3 PostgreSQL Storage & Migrations (FastAPI skeleton, AsyncPG, Alembic, GIN indexing, Idempotent Loader, Quality Gates).
+**Status:** Day 4 Docker, Compose Stack & Test Pyramid (FastAPI, AsyncPG, Alembic, Multi-stage Docker, Compose Stack, Split Test Pyramid, >80% Coverage).
 
 ---
 
@@ -153,14 +153,21 @@ uv run uvicorn docksmith.api.main:create_app --factory --reload --host 127.0.0.1
 ## Running Quality Checks & Tests
 
 ```bash
-# Run full test suite (25 tests covering unit and database integration)
-uv run pytest
+# Run unit test suite (16 tests, fast in-memory, no network)
+make test
+# Or: uv run poe test
 
-# Run Ruff linting
-uv run ruff check .
+# Run PostgreSQL integration tests (7 tests with real database)
+make test-integration
+# Or: uv run poe test-integration
 
-# Run Ruff formatting check
-uv run ruff format --check .
+# Run branch test coverage (>80% required)
+make cov
+# Or: uv run poe cov
+
+# Run Ruff linting and formatting check
+make lint
+# Or: uv run poe lint
 
 # Run pre-commit hooks across all files
 uv run pre-commit run --all-files
