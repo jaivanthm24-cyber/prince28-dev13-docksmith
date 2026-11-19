@@ -117,11 +117,12 @@ def test_generated_request_id(client):
     assert response.headers["X-Request-ID"]
 
 
-def test_settings_required():
+def test_settings_required(monkeypatch):
     from pydantic import ValidationError
 
     from docksmith.config import Settings
 
+    monkeypatch.delenv("APP_ENV", raising=False)
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
 
