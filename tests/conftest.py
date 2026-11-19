@@ -14,29 +14,22 @@ class FakeRepository:
             {
                 "id": "001",
                 "topic_id": "multi-stage-builds",
-                "title": "Multi-Stage Builds",
                 "category": "build",
+                "title": "Multi-Stage Builds",
                 "doc_type": "guide",
                 "source_url": "https://docs.docker.com/build/building/multi-stage/",
                 "licence": None,
                 "published_on": None,
-                "pages": [
-                    {"id": 1, "page_no": 1, "text": "Page 1 overview"},
-                    {"id": 2, "page_no": 2, "text": "Page 2 rules"},
-                ],
             },
             {
                 "id": "002",
                 "topic_id": "cmd-vs-entrypoint",
-                "title": "CMD vs ENTRYPOINT Instructions",
                 "category": "reference",
+                "title": "CMD vs ENTRYPOINT Instructions",
                 "doc_type": "reference",
                 "source_url": "https://docs.docker.com/reference/dockerfile/#entrypoint",
                 "licence": None,
                 "published_on": None,
-                "pages": [
-                    {"id": 3, "page_no": 1, "text": "Page 1 commands"},
-                ],
             },
         ]
 
@@ -44,41 +37,27 @@ class FakeRepository:
         results = self.documents
 
         if q:
-            needle = q.lower()
             results = [
                 doc
                 for doc in results
-                if needle in doc["title"].lower()
-                or needle in doc["topic_id"].lower()
-                or needle in doc["id"].lower()
+                if q.lower() in doc["title"].lower() or q.lower() in doc.get("topic_id", "").lower()
             ]
 
         for key, value in filters.items():
             results = [doc for doc in results if str(doc.get(key, "")).lower() == value.lower()]
 
         total = len(results)
-        return total, [
-            {k: v for k, v in doc.items() if k != "pages"}
-            for doc in results[offset : offset + limit]
-        ]
+        return total, results[offset : offset + limit]
 
-    async def get(self, identifier):
-        for doc in self.documents:
-            if doc["id"] == identifier or doc.get("topic_id") == identifier:
-                return {k: v for k, v in doc.items() if k != "pages"}
-        return None
-
-    async def get_with_pages(self, identifier):
-        for doc in self.documents:
-            if doc["id"] == identifier or doc.get("topic_id") == identifier:
-                return doc
-        return None
-
-    async def create(self, data, pages=None):
-        doc = dict(data)
-        doc["pages"] = pages or []
-        self.documents.append(doc)
-        return {k: v for k, v in doc.items() if k != "pages"}
+    async def get(self, external_id):
+        return next(
+            (
+                doc
+                for doc in self.documents
+                if doc["id"] == external_id or doc.get("topic_id") == external_id
+            ),
+            None,
+        )
 
 
 @pytest.fixture
@@ -91,6 +70,7 @@ def client(fake_repo):
     settings = Settings(
         app_env="ci",
         database_url="postgresql://localhost:5432/testdb",
+        _env_file=None,
     )
 
     app = create_app(settings)
