@@ -1,23 +1,4 @@
 import pytest
-from fastapi.testclient import TestClient
-from pydantic import ValidationError
-from sqlalchemy.exc import ArgumentError
-
-from docksmith.api.deps import get_session
-from docksmith.api.main import create_app
-from docksmith.config import Settings
-
-
-@pytest.fixture
-def client():
-    settings = Settings(
-        app_env="ci",
-        data_file="data/sample_records.json",
-    )
-    app = create_app(settings)
-
-    with TestClient(app) as test_client:
-        yield test_client
 
 
 def test_health_endpoint(client):
@@ -34,29 +15,18 @@ def test_ready_endpoint(client):
     assert response.json()["status"] == "ready"
 
 
-def test_ready_returns_503_when_records_missing() -> None:
-    class _EmptyResult:
-        def scalar_one(self) -> int:
-            return 0
+def test_ready_database_down(client, monkeypatch):
+    from docksmith.api.deps import check_db
 
-    class _EmptySession:
-        async def execute(self, _stmt) -> _EmptyResult:
-            return _EmptyResult()
+    async def database_down():
+        return False
 
-    async def _override_session():
-        yield _EmptySession()
+    client.app.dependency_overrides[check_db] = database_down
 
-    app = create_app(
-        Settings(
-            app_name="docksmith",
-            app_env="ci",
-            log_level="WARNING",
-        )
-    )
-    app.dependency_overrides[get_session] = _override_session
-    res = TestClient(app).get("/ready")
-    assert res.status_code == 503
-    assert res.json()["status"] == "not_ready"
+    response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["status"] == "not_ready"
 
 
 def test_list_documents(client):
@@ -64,15 +34,71 @@ def test_list_documents(client):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["total"] == 20
+
+    assert data["total"] == 2
     assert len(data["items"]) == 2
 
 
-def test_get_multistage_document(client):
-    response = client.get("/v1/documents/multi-stage-builds")
+def test_list_documents_pagination(client):
+    response = client.get("/v1/documents?limit=1&offset=1")
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["total"] == 2
+    assert len(data["items"]) == 1
+    assert data["items"][0]["id"] == "002"
+
+
+def test_search_documents(client):
+    response = client.get("/v1/documents?q=multi-stage")
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["total"] == 1
+    assert data["items"][0]["topic_id"] == "multi-stage-builds"
+
+
+def test_metadata_filter(client):
+    response = client.get("/v1/documents?category=build")
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["total"] == 1
+    assert data["items"][0]["topic_id"] == "multi-stage-builds"
+
+
+def test_invalid_filter_name(client):
+    response = client.get("/v1/documents?Bad-Name=1")
+
+    assert response.status_code == 400
+    assert response.headers["content-type"].startswith("application/problem+json")
+
+
+def test_get_document_found(client):
+    response = client.get("/v1/documents/001")
 
     assert response.status_code == 200
     assert response.json()["topic_id"] == "multi-stage-builds"
+
+
+def test_get_document_by_topic_id(client):
+    response = client.get("/v1/documents/multi-stage-builds")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "001"
+
+
+def test_get_document_pages(client):
+    response = client.get("/v1/documents/001/pages")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "pages" in data
+    assert len(data["pages"]) == 2
+    assert data["pages"][0]["page_no"] == 1
 
 
 def test_missing_document(client):
@@ -89,14 +115,77 @@ def test_invalid_limit(client):
     assert response.headers["content-type"].startswith("application/problem+json")
 
 
-def test_get_document_by_internal_id(client):
-    response = client.get("/v1/documents/001")
+def test_create_document(client):
+    payload = {
+        "id": "003",
+        "title": "BuildKit Secrets",
+        "source_url": "https://docs.docker.com/build/building/secrets/",
+        "metadata": {"topic_id": "buildkit-secrets", "category": "build"},
+        "pages": [{"page_no": 1, "text": "Secret mounts documentation"}],
+    }
+    response = client.post("/v1/documents", json=payload)
+    assert response.status_code == 201
+    assert response.json()["id"] == "003"
+
+
+def test_create_document_duplicate_conflict(client):
+    payload = {
+        "id": "001",
+        "title": "Duplicate Document",
+    }
+    response = client.post("/v1/documents", json=payload)
+    assert response.status_code == 409
+
+
+def test_request_id_echoed(client):
+    request_id = "test-request-123"
+
+    response = client.get(
+        "/health",
+        headers={"X-Request-ID": request_id},
+    )
 
     assert response.status_code == 200
-    assert response.json()["id"] == "001"
-    assert response.json()["topic_id"] == "multi-stage-builds"
+    assert response.headers["X-Request-ID"] == request_id
 
 
-def test_settings_rejects_empty_database_url() -> None:
-    with pytest.raises((ValidationError, ValueError, ArgumentError)):
-        Settings(_env_file=None, database_url="")
+def test_generated_request_id(client):
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.headers["X-Request-ID"]
+
+
+def test_settings_required():
+    from pydantic import ValidationError
+
+    from docksmith.config import Settings
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_database_url_conversion():
+    from docksmith.config import Settings
+
+    settings = Settings(
+        app_env="ci",
+        database_url="postgresql://localhost:5432/testdb",
+        _env_file=None,
+    )
+
+    assert settings.database_url.startswith("postgresql+asyncpg://")
+
+
+def test_database_url_removes_unsupported_parameters():
+    from docksmith.config import Settings
+
+    settings = Settings(
+        app_env="ci",
+        database_url=("postgresql://localhost:5432/testdb?sslmode=require&channel_binding=require"),
+        _env_file=None,
+    )
+
+    assert settings.database_url.startswith("postgresql+asyncpg://")
+    assert "sslmode" not in settings.database_url
+    assert "channel_binding" not in settings.database_url
