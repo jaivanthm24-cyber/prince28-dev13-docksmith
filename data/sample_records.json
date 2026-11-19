@@ -19,7 +19,8 @@
         ],
         "hadolint_rules": [
             "DL3006"
-        ]
+        ],
+        "source_url": "https://docs.docker.com/build/building/multi-stage/"
     },
     {
         "id": "002",
@@ -40,7 +41,8 @@
         ],
         "hadolint_rules": [
             "DL3025"
-        ]
+        ],
+        "source_url": "https://docs.docker.com/reference/dockerfile/#entrypoint"
     },
     {
         "id": "003",
@@ -61,7 +63,8 @@
         ],
         "hadolint_rules": [
             "COMPOSE01"
-        ]
+        ],
+        "source_url": "https://docs.docker.com/compose/compose-file/04-version-and-name/"
     },
     {
         "id": "004",
@@ -87,7 +90,8 @@
             "DL3008",
             "DL3013",
             "DL3042"
-        ]
+        ],
+        "source_url": "https://docs.docker.com/build/cache/optimize/"
     },
     {
         "id": "005",
@@ -106,7 +110,8 @@
             "Using bind mounts for production databases across differing host OS filesystems",
             "Storing state in container writable layers leading to disk bloat and data loss"
         ],
-        "hadolint_rules": []
+        "hadolint_rules": [],
+        "source_url": "https://docs.docker.com/storage/"
     },
     {
         "id": "006",
@@ -125,7 +130,8 @@
             "Assuming application crashed when it was actually killed by host kernel OOM killer",
             "Missing restart policy loops caused by failing healthchecks"
         ],
-        "hadolint_rules": []
+        "hadolint_rules": [],
+        "source_url": "https://docs.docker.com/engine/reference/commandline/inspect/"
     },
     {
         "id": "007",
@@ -144,7 +150,8 @@
         ],
         "hadolint_rules": [
             "DEPR01"
-        ]
+        ],
+        "source_url": "https://docs.docker.com/reference/dockerfile/#maintainer-deprecated"
     },
     {
         "id": "008",
@@ -164,7 +171,8 @@
         ],
         "hadolint_rules": [
             "BUILDKIT01"
-        ]
+        ],
+        "source_url": "https://docs.docker.com/build/cache/optimize/#use-cache-mounts"
     },
     {
         "id": "009",
@@ -185,7 +193,8 @@
         ],
         "hadolint_rules": [
             "DL3002"
-        ]
+        ],
+        "source_url": "https://docs.docker.com/engine/security/#general-guidelines"
     },
     {
         "id": "010",
@@ -206,7 +215,8 @@
         ],
         "hadolint_rules": [
             "DL3007"
-        ]
+        ],
+        "source_url": "https://docs.docker.com/build/building/best-practices/#use-official-images"
     },
     {
         "id": "011",
@@ -225,7 +235,8 @@
             "Missing .dockerignore resulting in multi-gigabyte build context uploads",
             "Accidentally leaking production .env files into image layers"
         ],
-        "hadolint_rules": []
+        "hadolint_rules": [],
+        "source_url": "https://docs.docker.com/build/building/context/#dockerignore-files"
     },
     {
         "id": "012",
@@ -246,7 +257,8 @@
         ],
         "hadolint_rules": [
             "DL3008"
-        ]
+        ],
+        "source_url": "https://docs.docker.com/build/building/best-practices/#apt-get"
     },
     {
         "id": "013",
@@ -265,7 +277,8 @@
         ],
         "hadolint_rules": [
             "DL3009"
-        ]
+        ],
+        "source_url": "https://docs.docker.com/build/building/best-practices/#apt-get"
     },
     {
         "id": "014",
@@ -286,7 +299,8 @@
         "hadolint_rules": [
             "DL3013",
             "DL3042"
-        ]
+        ],
+        "source_url": "https://docs.docker.com/build/cache/optimize/#use-cache-mounts"
     },
     {
         "id": "015",
@@ -305,7 +319,8 @@
         ],
         "hadolint_rules": [
             "DL3020"
-        ]
+        ],
+        "source_url": "https://docs.docker.com/reference/dockerfile/#add"
     },
     {
         "id": "016",
@@ -324,7 +339,8 @@
         ],
         "hadolint_rules": [
             "DL3025"
-        ]
+        ],
+        "source_url": "https://docs.docker.com/reference/dockerfile/#cmd"
     },
     {
         "id": "017",
@@ -343,7 +359,8 @@
             "Setting timeout too low resulting in false-positive container restarts",
             "Failing to set start_period on apps with database migrations"
         ],
-        "hadolint_rules": []
+        "hadolint_rules": [],
+        "source_url": "https://docs.docker.com/compose/compose-file/compose-file-v2/#healthcheck"
     },
     {
         "id": "018",
@@ -361,7 +378,8 @@
         "common_mistakes": [
             "Building images on Apple Silicon (arm64) without targeting linux/amd64 for x86 cloud deployments"
         ],
-        "hadolint_rules": []
+        "hadolint_rules": [],
+        "source_url": "https://docs.docker.com/build/building/multi-platform/"
     },
     {
         "id": "019",
@@ -379,7 +397,8 @@
         "common_mistakes": [
             "Assuming memory leaks are network disconnects because logs terminate abruptly without error tracebacks"
         ],
-        "hadolint_rules": []
+        "hadolint_rules": [],
+        "source_url": "https://docs.docker.com/config/containers/resource_constraints/"
     },
     {
         "id": "020",
@@ -397,6 +416,7 @@
         "common_mistakes": [
             "Assuming running a container as root inside rootless Docker has the same host privileges as rootful Docker"
         ],
-        "hadolint_rules": []
+        "hadolint_rules": [],
+        "source_url": "https://docs.docker.com/engine/security/rootless/"
     }
 ]
