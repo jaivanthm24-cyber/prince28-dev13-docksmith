@@ -55,6 +55,7 @@ source = ["docksmith"]
 branch = true
 
 [tool.coverage.report]
+fail_under = 80
 show_missing = true
 skip_covered = true
 
@@ -72,4 +73,4 @@ seed = "python scripts/load_db.py"
 help = "Integration tests against the Postgres from docker compose (run `make up` first)"
 cmd = "pytest tests/integration"
 # Local compose database only; override by exporting TEST_DATABASE_URL yourself.
-env.TEST_DATABASE_URL.default = "postgresql://app:app@localhost:5433/app_test" # pragma: allowlist secret
+env.TEST_DATABASE_URL.default = "postgresql://app:app@localhost:5432/app_test" # pragma: allowlist secret
