@@ -1,18 +1,12 @@
 """All SQL for documents lives here. Endpoints never write SQL themselves."""
 
-from __future__ import annotations
-
-import hashlib
-import json
 import re
-from datetime import date
 from typing import Any
 
 from sqlalchemy import Text, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from docksmith.db.models import Document, Page
+from docksmith.db.models import Document
 
 FILTER_KEY = re.compile(r"^[a-z_][a-z0-9_]{0,40}$")
 
@@ -26,15 +20,7 @@ def to_dict(doc: Document) -> dict[str, Any]:
         "doc_type": doc.doc_type,
         "source_url": doc.source_url,
         "licence": doc.licence,
-        "published_on": (doc.published_on.isoformat() if doc.published_on else None),
-    }
-
-
-def to_page_dict(page: Page) -> dict[str, Any]:
-    return {
-        "id": page.id,
-        "page_no": page.page_no,
-        "text": page.text,
+        "published_on": doc.published_on.isoformat() if doc.published_on else None,
     }
 
 
@@ -73,7 +59,6 @@ class DocumentRepository:
                 or_(
                     Document.title.ilike(like),
                     cast(Document.metadata_, Text).ilike(like),
-                    Document.external_id.ilike(like),
                 )
             )
 
@@ -95,69 +80,11 @@ class DocumentRepository:
 
         return total or 0, [to_dict(doc) for doc in rows]
 
-    async def get(self, identifier: str) -> dict[str, Any] | None:
-        stmt = select(Document).where(
-            or_(
-                Document.external_id == identifier,
-                Document.metadata_.contains({"topic_id": identifier}),
+    async def get(self, external_id: str) -> dict[str, Any] | None:
+        doc = await self.session.scalar(select(Document).where(Document.external_id == external_id))
+        if doc is None:
+            # Fallback to topic_id match in metadata
+            doc = await self.session.scalar(
+                select(Document).where(Document.metadata_["topic_id"].as_string() == external_id)
             )
-        )
-        doc = await self.session.scalar(stmt)
         return to_dict(doc) if doc else None
-
-    async def get_with_pages(self, identifier: str) -> dict[str, Any] | None:
-        stmt = (
-            select(Document)
-            .options(selectinload(Document.pages))
-            .where(
-                or_(
-                    Document.external_id == identifier,
-                    Document.metadata_.contains({"topic_id": identifier}),
-                )
-            )
-        )
-        doc = await self.session.scalar(stmt)
-        if not doc:
-            return None
-        res = to_dict(doc)
-        res["pages"] = [to_page_dict(p) for p in sorted(doc.pages, key=lambda x: x.page_no)]
-        return res
-
-    async def create(
-        self, data: dict[str, Any], pages: list[dict[str, Any]] | None = None
-    ) -> dict[str, Any]:
-        canonical = json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-        sha256 = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-        known = {
-            "id",
-            "external_id",
-            "title",
-            "source_url",
-            "official_doc_url",
-            "licence",
-            "doc_type",
-            "published_on",
-        }
-        metadata = {k: v for k, v in data.items() if k not in known}
-
-        pub = data.get("published_on")
-        pub_date = date.fromisoformat(pub) if isinstance(pub, str) else pub
-
-        doc = Document(
-            external_id=str(data.get("external_id") or data["id"]),
-            title=str(data["title"]),
-            source_url=data.get("official_doc_url") or data.get("source_url"),
-            licence=data.get("licence"),
-            doc_type=data.get("doc_type") or "record",
-            published_on=pub_date,
-            sha256=sha256,
-            metadata_=metadata,
-        )
-
-        if pages:
-            doc.pages = [Page(page_no=p["page_no"], text=p["text"]) for p in pages]
-
-        self.session.add(doc)
-        await self.session.commit()
-        return to_dict(doc)
