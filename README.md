@@ -2,7 +2,7 @@
 
 A Docker and Compose expert that answers from the official Docker docs and checks every Dockerfile it suggests with a linter and a real build.
 
-**Status:** Day 4 Docker, Compose Stack & Test Pyramid (FastAPI, AsyncPG, Alembic, Multi-stage Docker, Compose Stack, Split Test Pyramid, >80% Coverage).
+**Status:** Production-Ready (Multi-stage Dockerfile, Docker Compose Stack, Split Test Pyramid, PostgreSQL with pgvector, GIN Indexing, CI Workflow).
 
 ---
 
@@ -40,104 +40,110 @@ Dockerfile doctor: paste a Dockerfile and get the fixed version with hadolint re
 ## Architecture Overview
 
 ```
-Client (Web / HTTP)
+Client (Web / HTTP / CLI)
        │
        ▼
 FastAPI Application (docksmith.api.main)
   ├── Lifespan Manager (Engine & Sessionmaker lifecycle)
   ├── Middleware (Request context ID, latency timing, RFC 9457 errors)
   ├── Routes:
-  │     ├── GET  /health           (Liveness check)
-  │     ├── GET  /ready            (Database readiness check)
-  │     ├── GET  /v1/documents     (List, search, JSONB metadata filters)
-  │     ├── GET  /v1/documents/{id}(Lookup by external_id or topic_id)
+  │     ├── GET  /health              (Liveness check)
+  │     ├── GET  /ready               (Database readiness check)
+  │     ├── GET  /v1/documents        (List, search, JSONB metadata filters)
+  │     ├── GET  /v1/documents/{id}   (Lookup by external_id or topic_id)
   │     ├── GET  /v1/documents/{id}/pages (Document with page chunks)
-  │     └── POST /v1/documents     (Idempotent creation with SHA-256)
+  │     └── POST /v1/documents        (Create document with SHA-256)
        │
        ▼
 DocumentRepository (docksmith.db.repository)
        │
        ▼
-PostgreSQL Database (SQLAlchemy 2.0 Async + asyncpg)
+PostgreSQL Database (SQLAlchemy 2.0 Async + asyncpg on 127.0.0.1:5432)
   ├── documents (id, external_id, title, sha256, metadata [JSONB GIN])
   └── pages     (id, document_id [FK CASCADE], page_no [CHECK >= 1], text)
 ```
 
 ---
 
-## Prerequisites & Installation
+## Run Locally in One Command
+
+You only need Docker running. From a fresh clone:
+
+```bash
+docker compose up --build -d
+```
+
+This starts:
+- **Postgres (with pgvector)** on `127.0.0.1:5432` (`app` and `app_test` databases)
+- **Redis 7** on `127.0.0.1:6379`
+- **Migrate container** (runs `alembic upgrade head` and seeds 20 documents, then exits `0`)
+- **FastAPI API** on `127.0.0.1:8000`
+
+Inspect service status:
+```bash
+docker compose ps
+```
+
+- API docs: http://127.0.0.1:8000/docs
+- Liveness: http://127.0.0.1:8000/health
+- Readiness (checks database connectivity): http://127.0.0.1:8000/ready
+
+To stop the stack:
+```bash
+docker compose down
+# Add -v to clean persistent database volume
+docker compose down -v
+```
+
+---
+
+## Local Development Workflow
 
 ### 1. Requirements
-- Ubuntu 22.04+ / Linux
+- Linux / macOS / WSL2
 - Python 3.12+
 - `uv` package manager (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
-- Docker (for isolated PostgreSQL database)
+- Docker & Docker Compose
 
-### 2. Environment Setup
+### 2. Environment Configuration
 ```bash
-# Clone and enter directory
-cd "day 2/newww"
-
-# Sync dependencies and create virtual environment
+# Sync local virtual environment
 uv sync
 
 # Configure environment variables
 cp .env.example .env
 ```
 
-### 3. PostgreSQL Database Setup
-DockSmith utilizes a dedicated local PostgreSQL container bound strictly to `127.0.0.1:5432`:
-
-```bash
-# Launch PostgreSQL 16 container
-docker run -d \
-  --name docksmith-postgres \
-  --restart unless-stopped \
-  -e POSTGRES_USER=postgres \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=docksmith \
-  -p 127.0.0.1:5432:5432 \
-  -v docksmith-pgdata:/var/lib/postgresql/data \
-  postgres:16-alpine
-
-# Verify connectivity
-uv run python scripts/db_check.py
+Standardized environment values in `.env`:
+```env
+APP_NAME=docksmith
+APP_ENV=local
+LOG_LEVEL=INFO
+DATA_FILE=data/sample_records.json
+DATABASE_URL=postgresql://app:app@localhost:5432/app  # pragma: allowlist secret
+TEST_DATABASE_URL=postgresql://app:app@localhost:5432/app_test  # pragma: allowlist secret
+REDIS_URL=redis://localhost:6379/0
 ```
 
-### 4. Database Migrations
-Apply Alembic migrations to construct the database schema and GIN indexes:
-```bash
-# Upgrade schema to head revision
-uv run alembic upgrade head
+### 3. Task Runner Commands
 
-# (Optional) Verify downgrade and upgrade
-uv run alembic downgrade -1
-uv run alembic upgrade head
-```
-
-### 5. Ingest Records
-Load curated Docker & Compose reference records idempotently:
-```bash
-uv run python scripts/load_db.py
-# Output: records=20 inserted=20 updated=0 unchanged=0 pages_synced=40
-```
-
----
-
-## Running the Application
-
-```bash
-uv run uvicorn docksmith.api.main:create_app --factory --reload --host 127.0.0.1 --port 8000
-```
-
-- Interactive OpenAPI Swagger Docs: `http://localhost:8000/docs`
-- Healthcheck: `http://localhost:8000/health`
-- Readiness: `http://localhost:8000/ready`
-- Documents API: `http://localhost:8000/v1/documents`
+| Task | Make Shortcut | Windows / Poe Task | Description |
+|---|---|---|---|
+| Start local stack | `make up` | `docker compose up --build -d` | Launches Compose stack in background |
+| Stop local stack | `make down` | `docker compose down` | Stops stack containers |
+| Run API with reload | `make dev` | `uv run poe dev` | Runs FastAPI on `http://127.0.0.1:8000` |
+| Unit tests | `make test` | `uv run poe test` | 16 unit tests (< 0.5s, in-memory) |
+| Integration tests | `make test-integration`| `uv run poe test-integration` | 7 PostgreSQL integration tests |
+| Coverage report | `make cov` | `uv run poe cov` | Branch coverage (enforces `fail_under = 80`) |
+| Lint & format check | `make lint` | `uv run poe lint` | Runs Ruff check and format verification |
+| DB migrations | `uv run poe migrate` | `uv run poe migrate` | Applies Alembic migrations |
+| Seed database | `uv run poe seed` | `uv run poe seed` | Ingests sample data idempotently |
 
 ---
 
 ## API Endpoints
+
+All endpoints follow RFC 7807 problem details for errors:
 
 | Method | Path | Description |
 | :--- | :--- | :--- |
@@ -150,67 +156,44 @@ uv run uvicorn docksmith.api.main:create_app --factory --reload --host 127.0.0.1
 
 ---
 
-## Running Quality Checks & Tests
+## Quality Checks & Testing
+
+The repository maintains a strict split test pyramid:
+- **16 Unit Tests** in `tests/unit/`: fast, in-memory, zero network dependencies, executing in ~0.25s.
+- **7 PostgreSQL Integration Tests** in `tests/integration/`: creates an isolated session-scoped test database (`app_test`), executes real Alembic migrations, verifies GIN query planning, loader idempotency, and API integration.
+- **Test Coverage**: Branch coverage is enforced with `fail_under = 80` in `pyproject.toml` (currently **85%** unit only, **87%** full stack).
+- **Pre-commit Quality Gates**: 9 hooks enforcing formatting, linting, yaml/toml checks, secret detection, and whitespace consistency.
 
 ```bash
-# Run unit test suite (16 tests, fast in-memory, no network)
+# Run unit tests
 make test
-# Or: uv run poe test
 
-# Run PostgreSQL integration tests (7 tests with real database)
+# Run PostgreSQL integration tests
 make test-integration
-# Or: uv run poe test-integration
 
-# Run branch test coverage (>80% required)
+# Run coverage analysis
 make cov
-# Or: uv run poe cov
 
-# Run Ruff linting and formatting check
-make lint
-# Or: uv run poe lint
-
-# Run pre-commit hooks across all files
+# Run all pre-commit hooks
 uv run pre-commit run --all-files
-
-# Run GIN index EXPLAIN query analysis
-uv run python scripts/explain.py
 ```
 
 ---
 
-## Troubleshooting
+## CI/CD Pipeline
 
-- **Database connection refused (`ECONNREFUSED` / `Cannot connect to host`)**:
-  Verify the Docker container is active: `docker ps | grep docksmith-postgres`. If stopped, restart with `docker start docksmith-postgres`.
-- **`psql` client wrapper**:
-  A user-space wrapper is available at `~/.local/bin/psql`. Test via `psql -U postgres -d docksmith -c "SELECT 1;"`.
-- **Secret scanning warnings**:
-  Ensure `.env` is never committed (`.gitignore` protects secrets). Use `.env.example` as a template.
+GitHub Actions executes automatically on pull requests and pushes to `main` via [.github/workflows/ci.yml](.github/workflows/ci.yml):
+- **Lint & Formatting**: Ruff check and formatting checks.
+- **Unit Tests & Coverage**: Executes unit test suite with coverage report.
+- **PostgreSQL Integration Tests**: Spins up `pgvector:pg17` and `redis:7-alpine` service containers, runs migrations, and tests real database operations.
+- **Docker Build & Security**: Verifies multi-stage build, ensures image size < 400 MB, and verifies non-root user execution (`uid=999`).
 
 ---
 
-## Run locally in one command
+## Completion Summary
 
-You need Docker Desktop running. From a fresh clone:
-
-```bash
-docker compose up --build
-```
-
-This starts Postgres (with pgvector), Redis, runs the migrations and loads the sample data once, then starts the API.
-
-- API docs: http://localhost:8000/docs
-- Liveness: http://localhost:8000/health
-- Readiness (checks the database): http://localhost:8000/ready
-
-Stop with `Ctrl+C`, then `docker compose down`. Add `-v` to also delete the database volume.
-
-## Develop and test
-
-| Task | Mac / Linux | Windows |
-|---|---|---|
-| Run the API with reload | `make dev` | `uv run poe dev` |
-| Unit tests (no network) | `make test` | `uv run poe test` |
-| Integration tests (needs `docker compose up`) | `make test-integration` | `uv run poe test-integration` |
-| Coverage report | `make cov` | `uv run poe cov` |
-| Lint and format check | `make lint` | `uv run poe lint` |
+- **Repository**: [jaivanthm24-cyber/prince28-dev13-docksmith](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith)
+- **Port Standardization**: `127.0.0.1:5432` for PostgreSQL, `127.0.0.1:6379` for Redis, `127.0.0.1:8000` for FastAPI API.
+- **Docker Image**: Multi-stage build with `uv:0.11.32`, non-root user `app:app` (`uid=999`), lean size: **70 MB** content / **300 MB** disk.
+- **Database & Migrations**: PostgreSQL 17 + pgvector, Alembic schema migrations, JSONB metadata with `jsonb_path_ops` GIN index.
+- **Test Pyramid**: 23 total automated tests (16 unit, 7 integration) passing with >80% coverage.
