@@ -79,6 +79,10 @@ def test_api_against_real_database(seeded):
         assert client.get("/ready").json()["checks"]["database"] is True
         assert client.get("/v1/documents/002").json()["title"] == "Beta"
         assert client.get("/v1/documents", params={"q": "gamm"}).json()["total"] == 1
+        assert client.get("/v1/documents/002/pages").status_code == 200
+        post_resp = client.post("/v1/documents", json={"title": "Delta", "id": "004"})
+        assert post_resp.status_code == 201
+        assert client.get("/v1/documents/004").json()["title"] == "Delta"
 
 
 def test_loader_is_idempotent(database_url, tmp_path):
