@@ -59,6 +59,35 @@ class FakeRepository:
             None,
         )
 
+    async def get_pages(self, external_id):
+        doc = await self.get(external_id)
+        if not doc:
+            return None
+        return {
+            **doc,
+            "pages": [{"page_no": 1, "text": f"Page 1 content for {doc['title']}"}],
+        }
+
+    async def create(self, data):
+        from fastapi import HTTPException
+
+        ext_id = data.get("id") or "003"
+        if any(d["id"] == ext_id for d in self.documents):
+            raise HTTPException(
+                status_code=409, detail=f"Document with id '{ext_id}' already exists."
+            )
+        new_doc = {
+            "id": ext_id,
+            "title": data["title"],
+            "doc_type": data.get("doc_type", "record"),
+            "source_url": data.get("source_url"),
+            "licence": data.get("licence"),
+            "published_on": data.get("published_on"),
+            **data.get("metadata", {}),
+        }
+        self.documents.append(new_doc)
+        return new_doc
+
 
 @pytest.fixture
 def fake_repo():
