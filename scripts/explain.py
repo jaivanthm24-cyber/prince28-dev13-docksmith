@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sys
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -14,11 +15,11 @@ QUERY = text("""
 """)
 
 
-async def main():
+async def main(field: str = "topic_id", value: str = "multi-stage-builds") -> None:
     settings = get_settings()
     engine = create_async_engine(settings.database_url)
 
-    metadata_filter = json.dumps({"topic_id": "multi-stage-builds"})
+    metadata_filter = json.dumps({field: value})
 
     try:
         async with engine.connect() as connection:
@@ -51,4 +52,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    if len(sys.argv) == 3:
+        asyncio.run(main(sys.argv[1], sys.argv[2]))
+    else:
+        asyncio.run(main())
