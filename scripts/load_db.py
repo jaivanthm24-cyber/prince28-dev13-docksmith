@@ -1,7 +1,9 @@
 """Load data/sample_records.json into Postgres.
 
-Safe to run again and again: new records are inserted, changed ones updated,
-unchanged ones skipped (we compare a sha256 fingerprint of each record).
+Safe to run repeatedly:
+- New records are inserted.
+- Changed records are updated.
+- Unchanged records are skipped.
 
 Run: uv run python scripts/load_db.py
 """
@@ -17,7 +19,8 @@ from docksmith.config import get_settings
 from docksmith.db.models import Document
 from docksmith.db.session import make_engine, make_sessionmaker
 
-KNOWN = {"id", "title", "official_doc_url", "source_url", "licence", "doc_type", "published_on"}
+TITLE_FIELD = "topic_id"
+KNOWN = {"id", "title", "source_url", "licence", "doc_type", "published_on"}
 
 
 def fingerprint(record: dict) -> str:
@@ -27,10 +30,11 @@ def fingerprint(record: dict) -> str:
 
 def to_row(record: dict) -> dict:
     published = record.get("published_on")
+
     return {
         "external_id": str(record["id"]),
-        "title": str(record.get("title") or record["id"]),
-        "source_url": record.get("official_doc_url") or record.get("source_url"),
+        "title": str(record.get("title") or record.get(TITLE_FIELD) or record["id"]),
+        "source_url": record.get("source_url") or record.get("official_doc_url"),
         "licence": record.get("licence"),
         "doc_type": record.get("doc_type") or "record",
         "published_on": date.fromisoformat(published) if published else None,
@@ -42,10 +46,12 @@ def to_row(record: dict) -> dict:
 async def main() -> None:
     settings = get_settings()
     records = json.loads(settings.data_file.read_text(encoding="utf-8"))
+
     engine = make_engine(settings)
     session_factory = make_sessionmaker(engine)
 
     inserted = updated = unchanged = 0
+
     async with session_factory() as session, session.begin():
         rows = await session.execute(select(Document.external_id, Document.sha256))
         existing = dict(rows.all())
@@ -53,18 +59,22 @@ async def main() -> None:
         for record in records:
             row = to_row(record)
             old = existing.get(row["external_id"])
+
             if old is None:
                 session.add(Document(**row))
                 inserted += 1
+
             elif old != row["sha256"]:
                 await session.execute(
                     update(Document).where(Document.external_id == row["external_id"]).values(**row)
                 )
                 updated += 1
+
             else:
                 unchanged += 1
 
     await engine.dispose()
+
     print(f"records={len(records)} inserted={inserted} updated={updated} unchanged={unchanged}")
 
 
