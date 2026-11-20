@@ -1,0 +1,66 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: cd-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Production Deployment & Smoke Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.32"
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run Production Database Migrations
+        env:
+          APP_ENV: production
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -n "$DATABASE_URL" ]; then
+            echo "Applying database migrations to production database..."
+            uv run alembic upgrade head
+          else
+            echo "NOTICE: DATABASE_URL secret not yet set. Skipping migration step."
+          fi
+
+      - name: Trigger Render Deployment
+        run: |
+          if [ -n "${{ secrets.RENDER_DEPLOY_HOOK }}" ]; then
+            echo "Triggering automated deploy on Render..."
+            curl -f -s -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+            echo "Render deployment triggered successfully."
+          else
+            echo "NOTICE: RENDER_DEPLOY_HOOK secret not yet set. Skipping deploy trigger."
+          fi
+
+      - name: Run Smoke Tests against Live Deployment
+        env:
+          LIVE_URL: ${{ vars.LIVE_URL }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          if [ -n "$LIVE_URL" ]; then
+            echo "Running smoke tests against $LIVE_URL (SHA: $EXPECTED_SHA)..."
+            uv run python scripts/smoke.py "$LIVE_URL" "$EXPECTED_SHA"
+          else
+            echo "NOTICE: LIVE_URL repository variable not yet set. Skipping smoke tests."
+          fi
