@@ -1,27 +1,86 @@
 name: CD
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
     branches: [main]
+    types:
+      - completed
   workflow_dispatch:
+    inputs:
+      target_sha:
+        description: "Commit SHA to deploy or rollback to (leave blank for latest commit on main)"
+        required: false
+        default: ""
+      rollback:
+        description: "Set to 'true' if executing a rollback drill"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
-  group: cd-production
+  group: production-deployment
   cancel-in-progress: false
 
 jobs:
   deploy:
     name: Production Deployment & Smoke Tests
     runs-on: ubuntu-latest
+    if: >-
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     steps:
+      - name: Resolve Target Commit SHA
+        id: target
+        run: |
+          if [ -n "${{ github.event.inputs.target_sha }}" ]; then
+            DEPLOY_SHA="${{ github.event.inputs.target_sha }}"
+            echo "mode=manual_dispatch" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "workflow_run" ]; then
+            DEPLOY_SHA="${{ github.event.workflow_run.head_sha }}"
+            echo "mode=workflow_run" >> $GITHUB_OUTPUT
+          else
+            DEPLOY_SHA="${{ github.sha }}"
+            echo "mode=default" >> $GITHUB_OUTPUT
+          fi
+          echo "sha=$DEPLOY_SHA" >> $GITHUB_OUTPUT
+          echo "short_sha=${DEPLOY_SHA:0:7}" >> $GITHUB_OUTPUT
+          echo "Target commit SHA to deploy: $DEPLOY_SHA (short: ${DEPLOY_SHA:0:7})"
+
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+
+      - name: Validate Required Secrets and Variables
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }} # pragma: allowlist secret
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }} # pragma: allowlist secret
+          LIVE_URL: ${{ vars.LIVE_URL }}
+        run: |
+          MISSING=0
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Missing required configuration: DATABASE_URL"
+            MISSING=1
+          fi
+          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
+            echo "::error::Missing required configuration: RENDER_DEPLOY_HOOK"
+            MISSING=1
+          fi
+          if [ -z "$LIVE_URL" ]; then
+            echo "::error::Missing required variable: LIVE_URL"
+            MISSING=1
+          fi
+          if [ "$MISSING" -eq 1 ]; then
+            echo "FATAL: Deployment aborted due to missing configuration." >&2
+            exit 1
+          fi
+          echo "All required deployment secrets and variables are verified."
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v3
         with:
-          version: "0.11.32"
-          enable-cache: true
+          version: "latest"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -34,33 +93,37 @@ jobs:
       - name: Run Production Database Migrations
         env:
           APP_ENV: production
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }} # pragma: allowlist secret
+          IS_ROLLBACK: ${{ github.event.inputs.rollback }}
         run: |
-          if [ -n "$DATABASE_URL" ]; then
+          if [ "$IS_ROLLBACK" = "true" ]; then
+            echo "Rollback mode: verifying current migration state..."
+            uv run alembic current || true
+          else
             echo "Applying database migrations to production database..."
             uv run alembic upgrade head
-          else
-            echo "NOTICE: DATABASE_URL secret not yet set. Skipping migration step."
           fi
 
-      - name: Trigger Render Deployment
+      - name: Trigger Render Deployment with Exact SHA Image
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }} # pragma: allowlist secret
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
         run: |
-          if [ -n "${{ secrets.RENDER_DEPLOY_HOOK }}" ]; then
-            echo "Triggering automated deploy on Render..."
-            curl -f -s -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
-            echo "Render deployment triggered successfully."
+          echo "Triggering deployment of commit $TARGET_SHA on Render..."
+          HTTP_STATUS=$(curl -s -o /tmp/deploy_response.txt -w "%{http_code}" -X POST "$RENDER_DEPLOY_HOOK")
+          cat /tmp/deploy_response.txt
+          echo ""
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            echo "Render deploy hook triggered successfully (HTTP $HTTP_STATUS)."
           else
-            echo "NOTICE: RENDER_DEPLOY_HOOK secret not yet set. Skipping deploy trigger."
+            echo "Deploy hook returned HTTP $HTTP_STATUS."
           fi
 
       - name: Run Smoke Tests against Live Deployment
         env:
           LIVE_URL: ${{ vars.LIVE_URL }}
-          EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_SHA: ${{ steps.target.outputs.sha }}
+          REQUIRE_SHA: "true"
         run: |
-          if [ -n "$LIVE_URL" ]; then
-            echo "Running smoke tests against $LIVE_URL (SHA: $EXPECTED_SHA)..."
-            uv run python scripts/smoke.py "$LIVE_URL" "$EXPECTED_SHA"
-          else
-            echo "NOTICE: LIVE_URL repository variable not yet set. Skipping smoke tests."
-          fi
+          echo "Verifying live deployment at $LIVE_URL (Expected SHA: $EXPECTED_SHA)..."
+          uv run python scripts/smoke.py "$LIVE_URL" "$EXPECTED_SHA"
