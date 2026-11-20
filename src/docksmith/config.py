@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     data_file: Path = Path("data/sample_records.json")
     database_url: str = "postgresql+asyncpg://localhost:5432/docksmith"
+    git_sha: str = "development"
 
     @field_validator("database_url", mode="before")
     @classmethod
