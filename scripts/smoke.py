@@ -3,7 +3,7 @@
 Usage:
     python scripts/smoke.py [LIVE_URL] [EXPECTED_SHA]
 Or set environment variables:
-    LIVE_URL=https://docksmith.onrender.com python scripts/smoke.py
+    LIVE_URL=https://docksmith.onrender.com EXPECTED_SHA=<commit_sha> python scripts/smoke.py
 """
 
 import json
@@ -40,14 +40,18 @@ def main() -> int:
     base_url = sys.argv[1] if len(sys.argv) > 1 else os.getenv("LIVE_URL", "http://127.0.0.1:8000")
     base_url = base_url.rstrip("/")
     expected_sha = sys.argv[2] if len(sys.argv) > 2 else os.getenv("EXPECTED_SHA")
+    require_sha = os.getenv("REQUIRE_SHA", "true" if expected_sha else "false").lower() == "true"
 
     print(f"=== DockSmith Smoke Tests: {base_url} ===")
     if expected_sha:
         print(f"Expected Git SHA: {expected_sha}")
+    elif require_sha:
+        print("FAIL: Expected Git SHA is strictly required for deployment smoke testing.")
+        return 1
 
     # Allow service to warm up if hosted on cold-start platform (e.g. Render free tier)
-    max_retries = 12
-    retry_interval = 5
+    max_retries = int(os.getenv("MAX_RETRIES", "15"))
+    retry_interval = int(os.getenv("RETRY_INTERVAL", "5"))
 
     health_ok = False
     health_data = {}
@@ -70,18 +74,33 @@ def main() -> int:
     # Verify Git SHA if expected_sha is provided
     running_sha = health_data.get("git_sha", "")
     if expected_sha:
-        if not running_sha.startswith(expected_sha[:7]):
-            print(f"FAIL: Running SHA '{running_sha}' does not match expected '{expected_sha}'.")
+        short_expected = expected_sha[:7]
+        if not running_sha.startswith(short_expected):
+            print(
+                f"FAIL: Running SHA '{running_sha}' does not match "
+                f"expected '{expected_sha}' (short: {short_expected})."
+            )
             return 1
-        print(f"  -> SHA verification passed: {running_sha}")
+        print(f"  -> SHA verification passed: running={running_sha}, expected={expected_sha}")
 
-    # Check /ready (database connectivity)
-    print("Probing /ready ...")
-    status, body = fetch(f"{base_url}/ready")
-    if status != 200 or not isinstance(body, dict) or body.get("status") != "ready":
-        print(f"FAIL: /ready returned status={status}, body={body}")
+    # Check /ready (database connectivity and readiness)
+    ready_ok = False
+    ready_data = {}
+    for attempt in range(1, 6):
+        print(f"Probing /ready (attempt {attempt}/5) ...")
+        status, body = fetch(f"{base_url}/ready")
+        if status == 200 and isinstance(body, dict) and body.get("status") == "ready":
+            checks = body.get("checks", {})
+            if isinstance(checks, dict) and checks.get("database") is True:
+                ready_ok = True
+                ready_data = body
+                break
+        time.sleep(2)
+
+    if not ready_ok:
+        print(f"FAIL: /ready database readiness check failed: {ready_data or body}")
         return 1
-    print(f"  -> OK (200): {body}")
+    print(f"  -> OK (200): database readiness verified ({ready_data})")
 
     # Check /docs (OpenAPI interactive docs)
     print("Probing /docs ...")
