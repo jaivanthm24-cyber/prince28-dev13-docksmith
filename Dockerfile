@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # ---------- Stage 1: build the virtual environment ----------
 FROM python:3.12-slim AS builder
 
@@ -36,9 +35,11 @@ COPY --chown=app:app migrations ./migrations
 COPY --chown=app:app scripts ./scripts
 COPY --chown=app:app data ./data
 
+ARG GIT_SHA="development"
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    GIT_SHA=$GIT_SHA
 
 USER app
 
