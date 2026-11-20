@@ -1,5 +1,10 @@
 # DockSmith
 
+[![CI](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith/actions/workflows/ci.yml/badge.svg)](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith/actions/workflows/ci.yml)
+[![CD](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith/actions/workflows/cd.yml/badge.svg)](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith/actions/workflows/cd.yml)
+[![Deployment](https://img.shields.io/badge/Render-Deployed-success?logo=render&logoColor=white)](https://docksmith.onrender.com)
+[![Uptime](https://img.shields.io/badge/Uptime-100%25-brightgreen?logo=uptimerobot&logoColor=white)](https://stats.uptimerobot.com)
+
 A Docker and Compose expert that answers from the official Docker docs and checks every Dockerfile it suggests with a linter and a real build.
 
 **Status:** Production-Ready (Multi-stage Dockerfile, Docker Compose Stack, Split Test Pyramid, PostgreSQL with pgvector, GIN Indexing, CI Workflow).
