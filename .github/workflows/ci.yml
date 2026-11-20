@@ -121,6 +121,9 @@ jobs:
   docker-build:
     name: Docker Image Build & Verification
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -128,8 +131,23 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker image
-        run: docker build -t docksmith:ci .
+      - name: Compute Git short SHA
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Log in to GitHub Container Registry
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Docker image with GIT_SHA
+        run: |
+          docker build \
+            --build-arg GIT_SHA=${{ github.sha }} \
+            -t docksmith:ci .
 
       - name: Verify non-root user execution
         run: |
@@ -139,3 +157,32 @@ jobs:
             exit 1
           fi
           echo "Verified non-root user: UID $USER_ID"
+
+      - name: Verify health endpoint returns GIT_SHA
+        env:
+          TEST_DB_URL: postgresql://test:test@localhost/test # pragma: allowlist secret
+        run: |
+          docker run -d --name test-health -p 8000:8000 \
+            -e APP_ENV=ci \
+            -e DATABASE_URL="$TEST_DB_URL" \
+            docksmith:ci
+          sleep 3
+          HEALTH=$(curl -s http://localhost:8000/health)
+          echo "Health response: $HEALTH"
+          docker stop test-health && docker rm test-health
+          if ! echo "$HEALTH" | grep -q "${{ github.sha }}"; then
+            echo "Error: Health response missing expected GIT_SHA: ${{ github.sha }}"
+            exit 1
+          fi
+
+      - name: Publish image to GHCR
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          IMAGE_NAME="ghcr.io/${{ github.repository }}"
+          IMAGE_NAME=$(echo "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
+          docker tag docksmith:ci "${IMAGE_NAME}:main"
+          docker tag docksmith:ci "${IMAGE_NAME}:sha-${{ github.sha }}"
+          docker tag docksmith:ci "${IMAGE_NAME}:sha-${{ steps.vars.outputs.sha_short }}"
+          docker push "${IMAGE_NAME}:main"
+          docker push "${IMAGE_NAME}:sha-${{ github.sha }}"
+          docker push "${IMAGE_NAME}:sha-${{ steps.vars.outputs.sha_short }}"
