@@ -2,10 +2,31 @@ import pytest
 
 
 def test_health_endpoint(client):
+    from fastapi.testclient import TestClient
+
+    from docksmith.api.main import create_app
+    from docksmith.config import Settings
+
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+    data = response.json()
+    assert data["status"] == "ok"
+    assert "git_sha" in data
+    assert data["git_sha"] == "development"
+
+    # Test health with custom GIT_SHA injected
+    custom_settings = Settings(
+        app_env="ci",
+        database_url="postgresql://localhost:5432/testdb",
+        git_sha="sha-custom123",
+        _env_file=None,
+    )
+    custom_app = create_app(custom_settings)
+    with TestClient(custom_app) as custom_client:
+        custom_resp = custom_client.get("/health")
+        assert custom_resp.status_code == 200
+        assert custom_resp.json()["git_sha"] == "sha-custom123"
 
 
 def test_ready_endpoint(client):
