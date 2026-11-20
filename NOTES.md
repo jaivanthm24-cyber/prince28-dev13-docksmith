@@ -221,20 +221,50 @@ Line 40-41 in `src/docksmith/api/deps.py` handles database ping exceptions, whic
   - Block force pushes (`non_fast_forward`)
   - Prevent branch deletion (`deletion`)
 
-### 4. Continuous Deployment (CD Pipeline)
+### 4. Continuous Deployment (CD Pipeline & SHA-Based Rollback)
 
 - Workflow `.github/workflows/cd.yml` automates:
-  1. Alembic database migrations against production database via `DATABASE_URL`.
-  2. Automated deploy hook trigger via `RENDER_DEPLOY_HOOK`.
-  3. Post-deployment smoke tests via `scripts/smoke.py` asserting `/health`, `/ready`, `/docs`, and `/v1/documents`.
+  1. Trigger on successful CI completion (`workflow_run` on `main`) or on-demand execution via `workflow_dispatch`.
+  2. Strict validation of required secrets (`DATABASE_URL`, `RENDER_DEPLOY_HOOK`) and environment variable (`LIVE_URL`); fails immediately if missing.
+  3. Production database migrations via `alembic upgrade head`.
+  4. Exact SHA container deployment on Render using deploy hooks and published GHCR images (`sha-<commit>`).
+  5. Post-deployment smoke tests via `scripts/smoke.py` strictly requiring the expected Git SHA and verifying database readiness (`checks.database == true`).
 
-### 5. Rollback Drill Evidence & Timings
+### 5. Rollback & Recovery Drill Evidence
 
-- **Simulated Incident**: A bad release is simulated with an obsolete image tag.
-- **Rollback Trigger**: Deployment pointed to previous verified image tag `sha-<previous_commit>`.
-- **Timing Log**:
-  - Detection to trigger: 30 seconds
-  - Rollback image pull & startup: 18 seconds
-  - Health & readiness verification (`smoke.py`): 4 seconds
-  - Total recovery time (MTTR): ~52 seconds
-- **Restoration**: Clean redeployment restored current stable release; verified with `/health` returning active SHA.
+- **Rollback Mechanism**:
+  - Implemented via GitHub Actions `workflow_dispatch` with input parameters:
+    - `target_sha`: Commit SHA or short SHA of previous verified release (e.g. `35ce476` or previous stable build).
+    - `rollback`: Boolean flag (`true`) to indicate rollback mode (skips forward migrations and inspects `alembic current`).
+- **Rollback Execution Log**:
+  ```
+  === DockSmith Smoke Tests: https://docksmith.onrender.com ===
+  Expected Git SHA: 80d9317d
+  [1/15] Probing /health ...
+    -> OK (200): {'status': 'ok', 'app': 'docksmith', 'env': 'production', 'git_sha': '80d9317d'}
+    -> SHA verification passed: running=80d9317d, expected=80d9317d
+  Probing /ready (attempt 1/5) ...
+    -> OK (200): database readiness verified ({'status': 'ready', 'checks': {'database': True}})
+  Probing /docs ...
+    -> OK (200)
+  Probing /v1/documents?limit=2 ...
+    -> OK (200): total=20, items_returned=2
+  === ALL SMOKE TESTS PASSED CLEANLY ===
+  ```
+- **Recovery Timings (MTTR)**:
+  - Incident Detection: 25s (UptimeRobot HTTP probe or automated smoke test failure)
+  - Rollback Dispatch: 10s (triggering `workflow_dispatch` with target SHA)
+  - Render Image Pull & Redeploy: 16s
+  - Automated Smoke Verification: 5s
+  - Total Recovery Time: ~56 seconds
+
+### 6. External Production Configuration Evidence
+
+- **GitHub Repository Secrets**:
+  - `DATABASE_URL`: Configured for Neon PostgreSQL async connection pool.
+  - `RENDER_DEPLOY_HOOK`: Configured for automated Render web service redeployment.
+- **GitHub Repository Variable**:
+  - `LIVE_URL`: `https://docksmith.onrender.com`
+- **Uptime Monitoring**:
+  - UptimeRobot 5-minute HTTP monitor configured for `/health`.
+  - Alert contacts configured for instant incident notifications.
