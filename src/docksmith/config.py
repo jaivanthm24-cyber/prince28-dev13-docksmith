@@ -1,5 +1,6 @@
 """All settings come from environment variables (or a local .env file)."""
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -29,6 +30,15 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_db_url(cls, v: str) -> str:
         return to_asyncpg_url(v)
+
+    @field_validator("git_sha", mode="before")
+    @classmethod
+    def _resolve_git_sha(cls, v: str | None) -> str:
+        if not v or v == "development":
+            render_commit = os.getenv("RENDER_GIT_COMMIT")
+            if render_commit:
+                return render_commit
+        return v or "development"
 
 
 @lru_cache
