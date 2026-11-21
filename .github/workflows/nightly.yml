@@ -1,0 +1,74 @@
+name: Nightly Health Check
+
+on:
+  schedule:
+    # Runs at 02:00 UTC (07:30 IST) every day
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    name: Production Health & Readiness Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.32"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Check Production Liveness and Readiness
+        env:
+          LIVE_URL: ${{ vars.LIVE_URL }}
+        run: |
+          TARGET_URL="${LIVE_URL:-https://prince28-dev13-docksmith.onrender.com}"
+          TARGET_URL="${TARGET_URL%/}"
+          echo "=== Nightly Health Probe: $TARGET_URL ==="
+
+          # 1. Probe /health
+          echo "Probing $TARGET_URL/health ..."
+          HEALTH_STATUS=$(curl -s -o /tmp/health.json -w "%{http_code}" "$TARGET_URL/health")
+          cat /tmp/health.json
+          echo ""
+          if [ "$HEALTH_STATUS" -ne 200 ]; then
+            echo "::error::Production /health check failed with HTTP status $HEALTH_STATUS"
+            exit 1
+          fi
+
+          # 2. Probe /ready
+          echo "Probing $TARGET_URL/ready ..."
+          READY_STATUS=$(curl -s -o /tmp/ready.json -w "%{http_code}" "$TARGET_URL/ready")
+          cat /tmp/ready.json
+          echo ""
+          if [ "$READY_STATUS" -ne 200 ]; then
+            echo "::error::Production /ready check failed with HTTP status $READY_STATUS"
+            exit 1
+          fi
+
+          # Verify database readiness in JSON body
+          DB_CHECK=$(python3 -c "import json; data=json.load(open('/tmp/ready.json')); print(data.get('checks', {}).get('database', False))")
+          if [ "$DB_CHECK" != "True" ]; then
+            echo "::error::Production /ready reported database check is not healthy ($DB_CHECK)"
+            exit 1
+          fi
+          echo "Database readiness verified: healthy."
+
+          # 3. Probe /docs
+          echo "Probing $TARGET_URL/docs ..."
+          DOCS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$TARGET_URL/docs")
+          if [ "$DOCS_STATUS" -ne 200 ]; then
+            echo "::error::Production /docs check failed with HTTP status $DOCS_STATUS"
+            exit 1
+          fi
+
+          echo "=== All nightly production health checks passed successfully ==="
