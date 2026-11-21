@@ -6,6 +6,7 @@
 [![Nightly](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith/actions/workflows/nightly.yml/badge.svg)](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith/actions/workflows/nightly.yml)
 [![Render Live](https://img.shields.io/website?down_color=red&down_message=offline&label=Render%20Live&up_color=success&up_message=online&url=https%3A%2F%2Fprince28-dev13-docksmith.onrender.com%2Fhealth)](https://prince28-dev13-docksmith.onrender.com/health)
 [![UptimeRobot](https://img.shields.io/badge/UptimeRobot-Monitored%20(5m)-brightgreen?logo=uptimerobot&logoColor=white)](https://stats.uptimerobot.com)
+[![Uptime Status](https://img.shields.io/website?down_color=red&down_message=down&label=UptimeRobot%20Status&up_color=brightgreen&up_message=up&url=https%3A%2F%2Fprince28-dev13-docksmith.onrender.com%2Fhealth)](https://stats.uptimerobot.com)
 
 A Docker and Compose expert that answers from the official Docker docs and checks every Dockerfile it suggests with a linter and a real build.
 
