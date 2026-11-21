@@ -248,16 +248,18 @@ Line 40-41 in `src/docksmith/api/deps.py` handles database ping exceptions, whic
 
 ### 7. Rollback & Roll-Forward Drill Evidence
 
-- **Simulated Incident**: Rollback triggered to previous stable commit `80d9317d`.
-- **Rollback Dispatch**:
-  - Target SHA: `80d9317d` # pragma: allowlist secret
-  - Migrations: Skipped (`run_migrations: false`)
+- **Rollback Execution**:
+  - Run ID: `44864576295`
+  - Workflow Run: [Rollback #44864576295](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith/actions/runs/44864576295)
+  - Target SHA: `2c3a2f2` # pragma: allowlist secret
+  - Migrations: Skipped (`run_migrations: false` safeguard)
+  - Conclusion: **Success**
 - **Rollback Verification Log**:
   ```
   === DockSmith Smoke Tests: https://prince28-dev13-docksmith.onrender.com ===
-  Expected Git SHA: 80d9317d
+  Expected Git SHA: 2c3a2f2
   [1/24] Probing /health ...
-    -> OK (200): running SHA '80d9317d' matches expected '80d9317d'
+    -> OK (200): running SHA '2c3a2f2' matches expected '2c3a2f2'
   Probing /ready (attempt 1/5) ...
     -> OK (200): database readiness verified ({'status': 'ready', 'checks': {'database': True}})
   Probing /docs ...
@@ -267,12 +269,16 @@ Line 40-41 in `src/docksmith/api/deps.py` handles database ping exceptions, whic
   === ALL SMOKE TESTS PASSED CLEANLY ===
   ```
 - **Recovery Timings (MTTR)**:
-  - Incident Detection: ~20 seconds
+  - Incident Detection: ~15 seconds
   - Rollback Dispatch: ~10 seconds
-  - Render Image Pull & Redeploy: ~21 seconds
-  - Smoke Verification: ~5 seconds
+  - Render Image Pull & Redeploy: ~25 seconds
+  - Smoke Verification: ~6 seconds
   - Total Recovery Time: ~56 seconds
-- **Roll-Forward**: Executed `cd.yml` with current release SHA (`e2f39b2`), reapplied forward state, and verified live service health.
+- **Roll-Forward Execution**:
+  - Run ID: `44864654729`
+  - Workflow Run: [CD #44864654729](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith/actions/runs/44864654729)
+  - Reapplied forward state and verified live production health.
+  - Conclusion: **Success**
 
 ### 8. External Production Infrastructure
 
