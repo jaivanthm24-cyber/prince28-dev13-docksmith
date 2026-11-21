@@ -118,6 +118,8 @@ jobs:
           else
             echo "Deploy hook returned HTTP $HTTP_STATUS."
           fi
+          echo "Waiting 10s for service transition..."
+          sleep 10
 
       - name: Run Smoke Tests against Live Deployment
         env:

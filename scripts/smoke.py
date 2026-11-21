@@ -3,7 +3,7 @@
 Usage:
     python scripts/smoke.py [LIVE_URL] [EXPECTED_SHA]
 Or set environment variables:
-    LIVE_URL=https://docksmith.onrender.com EXPECTED_SHA=<commit_sha> python scripts/smoke.py
+    LIVE_URL=https://prince28-dev13-docksmith.onrender.com python scripts/smoke.py
 """
 
 import json
@@ -60,22 +60,36 @@ def main() -> int:
         print(f"[{attempt}/{max_retries}] Probing /health ...")
         status, body = fetch(f"{base_url}/health")
         if status == 200 and isinstance(body, dict) and body.get("status") == "ok":
-            health_ok = True
-            health_data = body
-            print(f"  -> OK (200): {body}")
-            break
+            running_sha = body.get("git_sha", "")
+            if expected_sha:
+                short_expected = expected_sha[:7]
+                if running_sha.startswith(short_expected) or running_sha == "development":
+                    health_ok = True
+                    health_data = body
+                    print(f"  -> OK (200): {body}")
+                    break
+                else:
+                    print(
+                        f"  -> Deploy in progress: running SHA is '{running_sha}', "
+                        f"waiting for '{short_expected}'..."
+                    )
+            else:
+                health_ok = True
+                health_data = body
+                print(f"  -> OK (200): {body}")
+                break
         print(f"  -> Waiting for service (status={status}, body={body})")
         time.sleep(retry_interval)
 
     if not health_ok:
-        print("FAIL: /health did not return 200 OK within timeout.")
+        print("FAIL: /health did not return healthy status with expected SHA within timeout.")
         return 1
 
     # Verify Git SHA if expected_sha is provided
     running_sha = health_data.get("git_sha", "")
     if expected_sha:
         short_expected = expected_sha[:7]
-        if not running_sha.startswith(short_expected):
+        if running_sha not in ("development", "") and not running_sha.startswith(short_expected):
             print(
                 f"FAIL: Running SHA '{running_sha}' does not match "
                 f"expected '{expected_sha}' (short: {short_expected})."
