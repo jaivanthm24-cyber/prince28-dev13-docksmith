@@ -73,7 +73,7 @@ PostgreSQL Database (SQLAlchemy 2.0 Async + asyncpg on 127.0.0.1:5432)
 
 ---
 
-## Run Locally in One Command
+## Run locally in one command
 
 You only need Docker running. From a fresh clone:
 

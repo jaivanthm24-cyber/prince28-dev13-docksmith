@@ -12,6 +12,7 @@ def health(settings: SettingsDep) -> dict[str, str]:
         "status": "ok",
         "app": settings.app_name,
         "env": settings.app_env,
+        "version": settings.git_sha,
         "git_sha": settings.git_sha,
     }
 
