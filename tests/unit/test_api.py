@@ -13,7 +13,9 @@ def test_health_endpoint(client):
     data = response.json()
     assert data["status"] == "ok"
     assert "git_sha" in data
+    assert "version" in data
     assert data["git_sha"] == "development"
+    assert data["version"] == "development"
 
     # Test health with custom GIT_SHA injected
     custom_settings = Settings(
@@ -27,6 +29,7 @@ def test_health_endpoint(client):
         custom_resp = custom_client.get("/health")
         assert custom_resp.status_code == 200
         assert custom_resp.json()["git_sha"] == "sha-custom123"
+        assert custom_resp.json()["version"] == "sha-custom123"
 
     # Test health resolving RENDER_GIT_COMMIT when git_sha is default
     import os
