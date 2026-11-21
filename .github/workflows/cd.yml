@@ -78,9 +78,9 @@ jobs:
           echo "All required deployment secrets and variables are verified."
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v5
         with:
-          version: "latest"
+          version: "0.11.32"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -109,23 +109,36 @@ jobs:
           RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }} # pragma: allowlist secret
           TARGET_SHA: ${{ steps.target.outputs.sha }}
         run: |
-          echo "Triggering deployment of commit $TARGET_SHA on Render..."
-          HTTP_STATUS=$(curl -s -o /tmp/deploy_response.txt -w "%{http_code}" -X POST "$RENDER_DEPLOY_HOOK")
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_URL="ghcr.io/${REPO_LOWER}:${TARGET_SHA}"
+          ENCODED_IMAGE_URL=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$IMAGE_URL")
+
+          if [[ "$RENDER_DEPLOY_HOOK" == *"?"* ]]; then
+            DEPLOY_URL="${RENDER_DEPLOY_HOOK}&imgURL=${ENCODED_IMAGE_URL}"
+          else
+            DEPLOY_URL="${RENDER_DEPLOY_HOOK}?imgURL=${ENCODED_IMAGE_URL}"
+          fi
+
+          echo "Deploying exact image: $IMAGE_URL"
+          echo "Triggering Render deploy hook with imgURL parameter..."
+          HTTP_STATUS=$(curl -s -o /tmp/deploy_response.txt -w "%{http_code}" -X POST "$DEPLOY_URL")
           cat /tmp/deploy_response.txt
           echo ""
           if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
             echo "Render deploy hook triggered successfully (HTTP $HTTP_STATUS)."
           else
-            echo "Deploy hook returned HTTP $HTTP_STATUS."
+            echo "::error::Deploy hook failed with HTTP $HTTP_STATUS"
+            exit 1
           fi
-          echo "Waiting 10s for service transition..."
-          sleep 10
+          echo "Waiting 15s for Render service transition..."
+          sleep 15
 
       - name: Run Smoke Tests against Live Deployment
         env:
           LIVE_URL: ${{ vars.LIVE_URL }}
           EXPECTED_SHA: ${{ steps.target.outputs.sha }}
-          REQUIRE_SHA: "true"
+          MAX_RETRIES: "24"
+          RETRY_INTERVAL: "5"
         run: |
           echo "Verifying live deployment at $LIVE_URL (Expected SHA: $EXPECTED_SHA)..."
           uv run python scripts/smoke.py "$LIVE_URL" "$EXPECTED_SHA"

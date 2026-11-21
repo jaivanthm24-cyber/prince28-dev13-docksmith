@@ -40,17 +40,25 @@ def main() -> int:
     base_url = sys.argv[1] if len(sys.argv) > 1 else os.getenv("LIVE_URL", "http://127.0.0.1:8000")
     base_url = base_url.rstrip("/")
     expected_sha = sys.argv[2] if len(sys.argv) > 2 else os.getenv("EXPECTED_SHA")
-    require_sha = os.getenv("REQUIRE_SHA", "true" if expected_sha else "false").lower() == "true"
 
     print(f"=== DockSmith Smoke Tests: {base_url} ===")
-    if expected_sha:
-        print(f"Expected Git SHA: {expected_sha}")
-    elif require_sha:
-        print("FAIL: Expected Git SHA is strictly required for deployment smoke testing.")
+
+    # 1. Require non-empty SHA value
+    if not expected_sha or not expected_sha.strip():
+        print("FAIL: Expected Git SHA must be provided and cannot be empty.")
         return 1
 
+    expected_sha = expected_sha.strip()
+
+    # 2. Reject 'development' as a valid production SHA
+    if expected_sha.lower() == "development":
+        print("FAIL: 'development' is rejected as a valid production Git SHA.")
+        return 1
+
+    print(f"Expected Git SHA: {expected_sha}")
+
     # Allow service to warm up if hosted on cold-start platform (e.g. Render free tier)
-    max_retries = int(os.getenv("MAX_RETRIES", "15"))
+    max_retries = int(os.getenv("MAX_RETRIES", "24"))
     retry_interval = int(os.getenv("RETRY_INTERVAL", "5"))
 
     health_ok = False
@@ -60,42 +68,46 @@ def main() -> int:
         print(f"[{attempt}/{max_retries}] Probing /health ...")
         status, body = fetch(f"{base_url}/health")
         if status == 200 and isinstance(body, dict) and body.get("status") == "ok":
-            running_sha = body.get("git_sha", "")
-            if expected_sha:
-                short_expected = expected_sha[:7]
-                if running_sha.startswith(short_expected) or running_sha == "development":
-                    health_ok = True
-                    health_data = body
-                    print(f"  -> OK (200): {body}")
-                    break
-                else:
-                    print(
-                        f"  -> Deploy in progress: running SHA is '{running_sha}', "
-                        f"waiting for '{short_expected}'..."
-                    )
-            else:
+            running_sha = body.get("git_sha", "").strip()
+            if not running_sha:
+                print("  -> Service /health returned empty git_sha, waiting...")
+            elif running_sha.lower() == "development":
+                print("  -> Service running 'development' SHA, waiting for commit deployment...")
+            elif (
+                running_sha == expected_sha
+                or running_sha.startswith(expected_sha[:7])
+                or expected_sha.startswith(running_sha)
+            ):
                 health_ok = True
                 health_data = body
-                print(f"  -> OK (200): {body}")
+                print(
+                    f"  -> OK (200): running SHA '{running_sha}' matches expected '{expected_sha}'"
+                )
                 break
-        print(f"  -> Waiting for service (status={status}, body={body})")
+            else:
+                print(
+                    f"  -> Transitioning: running SHA '{running_sha}' != "
+                    f"expected '{expected_sha}'..."
+                )
+        else:
+            print(f"  -> Waiting for service (status={status}, body={body})")
         time.sleep(retry_interval)
 
     if not health_ok:
-        print("FAIL: /health did not return healthy status with expected SHA within timeout.")
+        print(f"FAIL: /health did not return running SHA matching '{expected_sha}' within timeout.")
         return 1
 
-    # Verify Git SHA if expected_sha is provided
-    running_sha = health_data.get("git_sha", "")
-    if expected_sha:
-        short_expected = expected_sha[:7]
-        if running_sha not in ("development", "") and not running_sha.startswith(short_expected):
-            print(
-                f"FAIL: Running SHA '{running_sha}' does not match "
-                f"expected '{expected_sha}' (short: {short_expected})."
-            )
-            return 1
-        print(f"  -> SHA verification passed: running={running_sha}, expected={expected_sha}")
+    running_sha = health_data.get("git_sha", "").strip()
+    if not running_sha or running_sha.lower() == "development":
+        print(f"FAIL: Running SHA '{running_sha}' is rejected as an invalid production SHA.")
+        return 1
+    if not (
+        running_sha == expected_sha
+        or running_sha.startswith(expected_sha[:7])
+        or expected_sha.startswith(running_sha)
+    ):
+        print(f"FAIL: Running SHA '{running_sha}' does not match expected '{expected_sha}'.")
+        return 1
 
     # Check /ready (database connectivity and readiness)
     ready_ok = False
