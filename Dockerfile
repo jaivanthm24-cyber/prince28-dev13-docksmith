@@ -39,6 +39,7 @@ ARG GIT_SHA="development"
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    APP_ENV="production" \
     GIT_SHA=$GIT_SHA
 
 USER app
