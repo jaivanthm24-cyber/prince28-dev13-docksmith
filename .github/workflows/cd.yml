@@ -124,6 +124,14 @@ jobs:
           HTTP_STATUS=$(curl -s -o /tmp/deploy_response.txt -w "%{http_code}" -X POST "$DEPLOY_URL")
           cat /tmp/deploy_response.txt
           echo ""
+
+          if [ "$HTTP_STATUS" -eq 400 ] && grep -qi "does not support image URLs" /tmp/deploy_response.txt; then
+            echo "Render service is Git-backed (docker env); triggering Git commit deployment hook..."
+            HTTP_STATUS=$(curl -s -o /tmp/deploy_response.txt -w "%{http_code}" -X POST "$RENDER_DEPLOY_HOOK")
+            cat /tmp/deploy_response.txt
+            echo ""
+          fi
+
           if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
             echo "Render deploy hook triggered successfully (HTTP $HTTP_STATUS)."
           else

@@ -117,6 +117,13 @@ jobs:
           cat /tmp/rollback_resp.txt
           echo ""
 
+          if [ "$HTTP_STATUS" -eq 400 ] && grep -qi "does not support image URLs" /tmp/rollback_resp.txt; then
+            echo "Render service is Git-backed (docker env); triggering Git commit deployment hook..."
+            HTTP_STATUS=$(curl -s -o /tmp/rollback_resp.txt -w "%{http_code}" -X POST "$RENDER_DEPLOY_HOOK")
+            cat /tmp/rollback_resp.txt
+            echo ""
+          fi
+
           if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
             echo "Render rollback trigger succeeded (HTTP $HTTP_STATUS)."
           else
