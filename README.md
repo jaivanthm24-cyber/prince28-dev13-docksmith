@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith/actions/workflows/ci.yml/badge.svg)](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith/actions/workflows/ci.yml)
 [![CD](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith/actions/workflows/cd.yml/badge.svg)](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith/actions/workflows/cd.yml)
+[![Rollback](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith/actions/workflows/rollback.yml/badge.svg)](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith/actions/workflows/rollback.yml)
+[![Nightly](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith/actions/workflows/nightly.yml/badge.svg)](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith/actions/workflows/nightly.yml)
 [![Render Live](https://img.shields.io/website?down_color=red&down_message=offline&label=Render%20Live&up_color=success&up_message=online&url=https%3A%2F%2Fprince28-dev13-docksmith.onrender.com%2Fhealth)](https://prince28-dev13-docksmith.onrender.com/health)
 [![UptimeRobot](https://img.shields.io/badge/UptimeRobot-Monitored%20(5m)-brightgreen?logo=uptimerobot&logoColor=white)](https://stats.uptimerobot.com)
 
@@ -185,20 +187,69 @@ uv run pre-commit run --all-files
 
 ---
 
-## CI/CD Pipeline
+## CI/CD & Deployment Architecture
 
-GitHub Actions executes automatically on pull requests and pushes to `main` via [.github/workflows/ci.yml](.github/workflows/ci.yml):
-- **Lint & Formatting**: Ruff check and formatting checks.
-- **Unit Tests & Coverage**: Executes unit test suite with coverage report.
-- **PostgreSQL Integration Tests**: Spins up `pgvector:pg17` and `redis:7-alpine` service containers, runs migrations, and tests real database operations.
-- **Docker Build & Security**: Verifies multi-stage build, ensures image size < 400 MB, and verifies non-root user execution (`uid=999`).
+### 1. CI Pipeline (`.github/workflows/ci.yml`)
+Executes automatically on every pull request and push to `main`:
+1. **Code Quality & Linting** (`lint`): Runs `ruff check` and `ruff format --check`.
+2. **Unit Tests & Coverage** (`unit-tests`): Runs 16 pytest unit tests with branch coverage (`fail_under = 80`).
+3. **PostgreSQL Integration Tests** (`integration-tests`): Boots isolated `pgvector:pg17` and `redis:7-alpine` service containers, executes Alembic migrations, and runs 7 database integration tests against real PostgreSQL.
+4. **Docker Image Build & Security** (`docker-build`):
+   - Strictly depends on all three prior jobs: `needs: [lint, unit-tests, integration-tests]`.
+   - Injects commit SHA via `--build-arg GIT_SHA=${{ github.sha }}`.
+   - Verifies non-root execution (`uid=999`).
+   - Verifies container `/health` endpoint returns running SHA.
+   - On merge to `main`, logs into GitHub Container Registry (`ghcr.io`) and publishes:
+     - `ghcr.io/jaivanthm24-cyber/prince28-dev13-docksmith:main`
+     - `ghcr.io/jaivanthm24-cyber/prince28-dev13-docksmith:<commit_sha>`
+     - `ghcr.io/jaivanthm24-cyber/prince28-dev13-docksmith:sha-<commit_sha>`
+
+### 2. Exact SHA Continuous Deployment (`.github/workflows/cd.yml`)
+- Triggers automatically upon successful CI completion on `main` (`workflow_run`) or manually via `workflow_dispatch`.
+- Validates required secrets (`DATABASE_URL`, `RENDER_DEPLOY_HOOK`) and variables (`LIVE_URL`); fails immediately if missing.
+- Applies production database migrations on Neon PostgreSQL via `alembic upgrade head`.
+- URL-encodes exact GHCR image URL `ghcr.io/jaivanthm24-cyber/prince28-dev13-docksmith:<commit_sha>` and triggers Render Deploy Hook using `&imgURL=${ENCODED_IMAGE_URL}`.
+- Executes strict smoke testing (`scripts/smoke.py`) requiring exact SHA match and database readiness. Deployment success is reported only after verification.
+
+### 3. Production Rollback Workflow (`.github/workflows/rollback.yml`)
+- Supports manual execution via GitHub Actions `workflow_dispatch`.
+- Takes `target_sha` as input parameter (rejects empty or `development` SHA).
+- Deploys exact GHCR image `ghcr.io/jaivanthm24-cyber/prince28-dev13-docksmith:<target_sha>` to Render via `imgURL`.
+- Skips database migrations during rollback by default to prevent schema corruption.
+- Runs automated smoke tests to verify the rolled-back version and reports final status.
+
+### 4. Nightly Health Monitoring (`.github/workflows/nightly.yml`)
+- Scheduled daily at `02:00 UTC` (`07:30 IST`) using GitHub Actions cron (`0 2 * * *`).
+- Probes `/health` (HTTP 200, status OK), `/ready` (HTTP 200, database healthy), and `/docs` (HTTP 200).
+- Exits with non-zero code on failure to alert the team.
+
+### 5. Main Branch Protection (`protect-main`)
+The `main` branch is protected by GitHub Ruleset `protect-main` (ID: `27710737`):
+- **Pull Requests Required**: Direct pushes to `main` are blocked.
+- **Strict Status Checks**: PR merge requires passing:
+  - `Code Quality & Linting`
+  - `Unit Tests & Coverage`
+  - `PostgreSQL Integration Tests`
+  - `Docker Image Build & Verification`
+- **Block Force Pushes**: `non_fast_forward` is blocked.
+- **Prevent Branch Deletion**: `deletion` is blocked.
+
+### 6. Release Tagging (`week-1`)
+Annotated tag `week-1` marks the production release:
+```bash
+git tag -a week-1 -m "Release week-1: Day 5 production-ready DockSmith"
+git push origin week-1
+```
 
 ---
 
-## Completion Summary
+## Production Verification Summary
 
-- **Repository**: [jaivanthm24-cyber/prince28-dev13-docksmith](https://github.com/jaivanthm24-cyber/prince28-dev13-docksmith)
-- **Port Standardization**: `127.0.0.1:5432` for PostgreSQL, `127.0.0.1:6379` for Redis, `127.0.0.1:8000` for FastAPI API.
-- **Docker Image**: Multi-stage build with `uv:0.11.32`, non-root user `app:app` (`uid=999`), lean size: **70 MB** content / **300 MB** disk.
-- **Database & Migrations**: PostgreSQL 17 + pgvector, Alembic schema migrations, JSONB metadata with `jsonb_path_ops` GIN index.
-- **Test Pyramid**: 23 total automated tests (16 unit, 7 integration) passing with >80% coverage.
+- **Live URL**: [https://prince28-dev13-docksmith.onrender.com](https://prince28-dev13-docksmith.onrender.com)
+- **Liveness Endpoint**: [https://prince28-dev13-docksmith.onrender.com/health](https://prince28-dev13-docksmith.onrender.com/health)
+- **Readiness Endpoint**: [https://prince28-dev13-docksmith.onrender.com/ready](https://prince28-dev13-docksmith.onrender.com/ready)
+- **Swagger Documentation**: [https://prince28-dev13-docksmith.onrender.com/docs](https://prince28-dev13-docksmith.onrender.com/docs)
+- **Documents API**: [https://prince28-dev13-docksmith.onrender.com/v1/documents](https://prince28-dev13-docksmith.onrender.com/v1/documents)
+- **Hosting Platform**: Render Free Web Service (`srv-dc0gbme1egvs73frp42g`)
+- **Database Backend**: Neon Managed PostgreSQL 17 (`ep-lingering-butterfly-ao1vs7d1-pooler`)
+- **Uptime Monitoring**: UptimeRobot 5-minute HTTP probe on `/health` with email alerting.

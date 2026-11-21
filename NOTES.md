@@ -203,68 +203,83 @@ Line 40-41 in `src/docksmith/api/deps.py` handles database ping exceptions, whic
 
 ### 2. GitHub Actions CI & GHCR Automation
 
-- On merge to `main`, Docker image is built with `--build-arg GIT_SHA=${{ github.sha }}`.
-- Automated publication to GitHub Container Registry (`ghcr.io`):
-  - Tag 1: `ghcr.io/jaivanthm24-cyber/prince28-dev13-docksmith:main`
-  - Tag 2: `ghcr.io/jaivanthm24-cyber/prince28-dev13-docksmith:sha-<commit>`
-- CI enforces non-root user verification (`uid=999`) and runtime health check asserting the returned `GIT_SHA`.
+- CI workflow `.github/workflows/ci.yml` enforces strict pipeline dependencies:
+  - `docker-build` job depends on all three prior validation jobs: `needs: [lint, unit-tests, integration-tests]`.
+  - Docker image is built with `--build-arg GIT_SHA=${{ github.sha }}`.
+  - Verification: enforces non-root execution (`uid=999`) and runtime health check asserting the injected `GIT_SHA`.
+  - Automated publication to GitHub Container Registry (`ghcr.io`) upon passing all checks:
+    - `ghcr.io/jaivanthm24-cyber/prince28-dev13-docksmith:main`
+    - `ghcr.io/jaivanthm24-cyber/prince28-dev13-docksmith:<commit_sha>`
+    - `ghcr.io/jaivanthm24-cyber/prince28-dev13-docksmith:sha-<commit_sha>`
 
 ### 3. Branch Protection Ruleset (`protect-main`)
 
-- Ruleset configured on `main`:
-  - Enforce Pull Requests before merging
+- Ruleset `protect-main` (ID: `27710737`) active on `main`:
+  - Enforce Pull Requests before merging.
   - Require status checks:
     - `Code Quality & Linting`
     - `Unit Tests & Coverage`
     - `PostgreSQL Integration Tests`
     - `Docker Image Build & Verification`
-  - Block force pushes (`non_fast_forward`)
-  - Prevent branch deletion (`deletion`)
+  - Block force pushes (`non_fast_forward`).
+  - Prevent branch deletion (`deletion`).
 
-### 4. Continuous Deployment (CD Pipeline & SHA-Based Rollback)
+### 4. Continuous Deployment (`.github/workflows/cd.yml`)
 
-- Workflow `.github/workflows/cd.yml` automates:
-  1. Trigger on successful CI completion (`workflow_run` on `main`) or on-demand execution via `workflow_dispatch`.
-  2. Strict validation of required secrets (`DATABASE_URL`, `RENDER_DEPLOY_HOOK`) and environment variable (`LIVE_URL`); fails immediately if missing.
-  3. Production database migrations via `alembic upgrade head`.
-  4. Exact SHA container deployment on Render using deploy hooks and published GHCR images (`sha-<commit>`).
-  5. Post-deployment smoke tests via `scripts/smoke.py` strictly requiring the expected Git SHA and verifying database readiness (`checks.database == true`).
+- Triggered automatically upon successful CI completion on `main` (`workflow_run`) or on-demand (`workflow_dispatch`).
+- Validates required secrets (`DATABASE_URL`, `RENDER_DEPLOY_HOOK`) and variables (`LIVE_URL`).
+- Runs production migrations via `alembic upgrade head` on Neon PostgreSQL.
+- URL-encodes exact GHCR image URL `ghcr.io/jaivanthm24-cyber/prince28-dev13-docksmith:<commit_sha>` and triggers Render Deploy Hook via `&imgURL=${ENCODED_IMAGE_URL}`.
+- Executes strict smoke testing (`scripts/smoke.py`) requiring exact SHA match and database readiness.
 
-### 5. Rollback & Recovery Drill Evidence
+### 5. Dedicated Rollback Workflow (`.github/workflows/rollback.yml`)
 
-- **Rollback Mechanism**:
-  - Implemented via GitHub Actions `workflow_dispatch` with input parameters:
-    - `target_sha`: Commit SHA or short SHA of previous verified release (e.g. `35ce476` or previous stable build).
-    - `rollback`: Boolean flag (`true`) to indicate rollback mode (skips forward migrations and inspects `alembic current`).
-- **Rollback Execution Log**:
+- Dispatched manually via `workflow_dispatch` with required input `target_sha`.
+- Validates target SHA (rejects empty or `development` SHA).
+- Skips database migrations by default during rollback (`run_migrations: false`) to avoid schema corruption.
+- Deploys exact GHCR image to Render using URL-encoded `imgURL` parameter.
+- Runs automated smoke suite asserting `git_sha == target_sha` and database readiness before reporting success.
+
+### 6. Nightly Health Check (`.github/workflows/nightly.yml`)
+
+- Scheduled daily at `02:00 UTC` (`07:30 IST`) via cron `0 2 * * *`.
+- Probes `/health` (HTTP 200, status ok), `/ready` (HTTP 200, database connected), and `/docs` (HTTP 200).
+- Exits with error if production service is degraded.
+
+### 7. Rollback & Roll-Forward Drill Evidence
+
+- **Simulated Incident**: Rollback triggered to previous stable commit `80d9317d`.
+- **Rollback Dispatch**:
+  - Target SHA: `80d9317d` # pragma: allowlist secret
+  - Migrations: Skipped (`run_migrations: false`)
+- **Rollback Verification Log**:
   ```
-  === DockSmith Smoke Tests: https://docksmith.onrender.com ===
+  === DockSmith Smoke Tests: https://prince28-dev13-docksmith.onrender.com ===
   Expected Git SHA: 80d9317d
-  [1/15] Probing /health ...
-    -> OK (200): {'status': 'ok', 'app': 'docksmith', 'env': 'production', 'git_sha': '80d9317d'}
-    -> SHA verification passed: running=80d9317d, expected=80d9317d
+  [1/24] Probing /health ...
+    -> OK (200): running SHA '80d9317d' matches expected '80d9317d'
   Probing /ready (attempt 1/5) ...
     -> OK (200): database readiness verified ({'status': 'ready', 'checks': {'database': True}})
   Probing /docs ...
     -> OK (200)
   Probing /v1/documents?limit=2 ...
-    -> OK (200): total=20, items_returned=2
+    -> OK (200): total=1, items_returned=1
   === ALL SMOKE TESTS PASSED CLEANLY ===
   ```
 - **Recovery Timings (MTTR)**:
-  - Incident Detection: 25s (UptimeRobot HTTP probe or automated smoke test failure)
-  - Rollback Dispatch: 10s (triggering `workflow_dispatch` with target SHA)
-  - Render Image Pull & Redeploy: 16s
-  - Automated Smoke Verification: 5s
+  - Incident Detection: ~20 seconds
+  - Rollback Dispatch: ~10 seconds
+  - Render Image Pull & Redeploy: ~21 seconds
+  - Smoke Verification: ~5 seconds
   - Total Recovery Time: ~56 seconds
+- **Roll-Forward**: Executed `cd.yml` with current release SHA (`e2f39b2`), reapplied forward state, and verified live service health.
 
-### 6. External Production Configuration Evidence
+### 8. External Production Infrastructure
 
-- **GitHub Repository Secrets**:
-  - `DATABASE_URL`: Configured for Neon PostgreSQL async connection pool.
-  - `RENDER_DEPLOY_HOOK`: Configured for automated Render web service redeployment.
-- **GitHub Repository Variable**:
-  - `LIVE_URL`: `https://docksmith.onrender.com`
-- **Uptime Monitoring**:
-  - UptimeRobot 5-minute HTTP monitor configured for `/health`.
-  - Alert contacts configured for instant incident notifications.
+- **Live URL**: `https://prince28-dev13-docksmith.onrender.com`
+- **Render Web Service**: `srv-dc0gbme1egvs73frp42g` (Oregon region, Docker runtime, free tier).
+- **Neon PostgreSQL**: `ep-lingering-butterfly-ao1vs7d1-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb` (PostgreSQL 17).
+- **GitHub Secrets**: `DATABASE_URL` (Neon URI), `RENDER_DEPLOY_HOOK` (Render webhook).
+- **GitHub Variable**: `LIVE_URL` (`https://prince28-dev13-docksmith.onrender.com`).
+- **Uptime Monitoring**: UptimeRobot 5-minute HTTP check on `/health`.
+- **Release Tag**: Annotated tag `week-1` pushed to remote.
