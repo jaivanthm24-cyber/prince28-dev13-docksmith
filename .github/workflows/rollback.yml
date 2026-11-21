@@ -1,0 +1,137 @@
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: "Target Git commit SHA to rollback to"
+        required: true
+        type: string
+      run_migrations:
+        description: "Apply database migrations (default: false - migrations are skipped during rollback)"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: Production Rollback & Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate Target Commit SHA
+        id: target
+        run: |
+          TARGET="${{ github.event.inputs.target_sha }}"
+          TARGET=$(echo "$TARGET" | tr -d '[:space:]')
+          if [ -z "$TARGET" ]; then
+            echo "::error::Target commit SHA cannot be empty."
+            exit 1
+          fi
+          if [ "${TARGET,,}" = "development" ]; then
+            echo "::error::'development' is not a valid commit SHA."
+            exit 1
+          fi
+          echo "target_sha=$TARGET" >> $GITHUB_OUTPUT
+          echo "short_sha=${TARGET:0:7}" >> $GITHUB_OUTPUT
+          echo "Rollback target SHA: $TARGET"
+
+      - name: Checkout target commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.target_sha }}
+
+      - name: Validate Required Secrets and Variables
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }} # pragma: allowlist secret
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }} # pragma: allowlist secret
+          LIVE_URL: ${{ vars.LIVE_URL }}
+        run: |
+          MISSING=0
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Missing required configuration: DATABASE_URL"
+            MISSING=1
+          fi
+          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
+            echo "::error::Missing required configuration: RENDER_DEPLOY_HOOK"
+            MISSING=1
+          fi
+          if [ -z "$LIVE_URL" ]; then
+            echo "::error::Missing required variable: LIVE_URL"
+            MISSING=1
+          fi
+          if [ "$MISSING" -eq 1 ]; then
+            echo "FATAL: Rollback aborted due to missing configuration." >&2
+            exit 1
+          fi
+          echo "All required rollback secrets and variables are verified."
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.32"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Database Migration Safety Check
+        env:
+          APP_ENV: production
+          DATABASE_URL: ${{ secrets.DATABASE_URL }} # pragma: allowlist secret
+          RUN_MIGRATIONS: ${{ github.event.inputs.run_migrations }}
+        run: |
+          echo "Inspecting current database migration revision:"
+          uv run alembic current || true
+          if [ "$RUN_MIGRATIONS" = "true" ]; then
+            echo "Explicitly instructed to run migrations during rollback..."
+            uv run alembic upgrade head
+          else
+            echo "Skipping database migrations during rollback to preserve schema stability."
+          fi
+
+      - name: Deploy Exact GHCR Image to Render
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }} # pragma: allowlist secret
+          TARGET_SHA: ${{ steps.target.outputs.target_sha }}
+        run: |
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_URL="ghcr.io/${REPO_LOWER}:${TARGET_SHA}"
+          ENCODED_IMAGE_URL=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$IMAGE_URL")
+
+          if [[ "$RENDER_DEPLOY_HOOK" == *"?"* ]]; then
+            DEPLOY_URL="${RENDER_DEPLOY_HOOK}&imgURL=${ENCODED_IMAGE_URL}"
+          else
+            DEPLOY_URL="${RENDER_DEPLOY_HOOK}?imgURL=${ENCODED_IMAGE_URL}"
+          fi
+
+          echo "Triggering Render rollback deployment for image $IMAGE_URL..."
+          HTTP_STATUS=$(curl -s -o /tmp/rollback_resp.txt -w "%{http_code}" -X POST "$DEPLOY_URL")
+          cat /tmp/rollback_resp.txt
+          echo ""
+
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            echo "Render rollback trigger succeeded (HTTP $HTTP_STATUS)."
+          else
+            echo "::error::Render deploy hook returned HTTP $HTTP_STATUS during rollback."
+            exit 1
+          fi
+          echo "Waiting 15 seconds for rollback initialization..."
+          sleep 15
+
+      - name: Verify Rollback via Smoke Tests
+        env:
+          LIVE_URL: ${{ vars.LIVE_URL }}
+          EXPECTED_SHA: ${{ steps.target.outputs.target_sha }}
+          MAX_RETRIES: "24"
+          RETRY_INTERVAL: "5"
+        run: |
+          echo "Verifying rolled-back live deployment at $LIVE_URL (Target SHA: $EXPECTED_SHA)..."
+          uv run python scripts/smoke.py "$LIVE_URL" "$EXPECTED_SHA"
