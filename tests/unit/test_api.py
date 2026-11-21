@@ -28,6 +28,23 @@ def test_health_endpoint(client):
         assert custom_resp.status_code == 200
         assert custom_resp.json()["git_sha"] == "sha-custom123"
 
+    # Test health resolving RENDER_GIT_COMMIT when git_sha is default
+    import os
+
+    mock_commit = "commit-4351b8b"
+    os.environ["RENDER_GIT_COMMIT"] = mock_commit
+    render_settings = Settings(
+        app_env="ci",
+        database_url="postgresql://localhost:5432/testdb",
+        _env_file=None,
+    )
+    render_app = create_app(render_settings)
+    with TestClient(render_app) as render_client:
+        render_resp = render_client.get("/health")
+        assert render_resp.status_code == 200
+        assert render_resp.json()["git_sha"] == mock_commit
+    del os.environ["RENDER_GIT_COMMIT"]
+
 
 def test_ready_endpoint(client):
     response = client.get("/ready")
