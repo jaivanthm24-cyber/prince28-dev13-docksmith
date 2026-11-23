@@ -289,3 +289,40 @@ Line 40-41 in `src/docksmith/api/deps.py` handles database ping exceptions, whic
 - **GitHub Variable**: `LIVE_URL` (`https://prince28-dev13-docksmith.onrender.com`).
 - **Uptime Monitoring**: UptimeRobot 5-minute HTTP check on `/health`.
 - **Release Tag**: Annotated tag `week-1` pushed to remote.
+
+
+## D06 · Collecting the corpus
+
+- Start target: Build + Dockerfile reference + Compose docs (about 600 pages)
+- Collected today: 236 files, 484 pages, 2.9 MB (from DATASET.md)
+- Doors used: URL list / Git repository
+
+### Licence check
+
+| Source | Licence or terms, in my words | May I show full text in answers? |
+|---|---|---|
+| docker-docs | Apache-2.0 (open source documentation) | Yes, with attribution and Apache-2.0 notice |
+| docker-website | Docker docs repository Apache-2.0 | Yes, with attribution and link to docs.docker.com |
+
+### robots.txt
+
+- Site: docs.docker.com . Its robots.txt says (2 lines): User-agent: * / Content-Signal: ai-train=yes, search=yes, ai-input=yes
+- Was anything blocked for my bot? What did I do about it? Nothing was blocked; robots.txt explicitly allows ai-input and crawl.
+
+### Kill and resume
+
+- Run 1: I pressed Ctrl+C after 3 files
+- Run 2: downloaded=7 skipped=3
+- Run 3: downloaded=0 skipped=10
+
+### Capacity (from docs/CAPACITY.md)
+
+- Tokens per page, measured: 750
+- Full corpus: 2.25 M tokens, 6,469 chunks, embedding about Rs 37, vectors 20 MB
+- The number that surprised me most, and why (2 lines):
+  Embedding the entire 3,000-page Docker documentation corpus only costs Rs 37 ($0.39), which is far cheaper than expected.
+  At the same time, the vectors and chunk text (~31 MB total) comfortably fit in a free-tier Postgres database.
+
+### One thing that went wrong today, and how I fixed it
+
+Running `scripts/fetch.py repo` initially failed because the directory `data/raw/docker-docs` already existed from the HTTP URL download. I updated the source name in `data/sources.csv` to `docker-website` so web pages and git repository files stay isolated in distinct subdirectories without name collision.
