@@ -4,8 +4,6 @@ on:
   schedule:
     # Runs at 02:00 UTC (07:30 IST) every day
     - cron: "0 2 * * *"
-    # Verification schedule ensuring automated cron execution
-    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 jobs:
