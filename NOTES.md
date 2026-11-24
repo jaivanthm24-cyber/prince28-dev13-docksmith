@@ -326,3 +326,48 @@ Line 40-41 in `src/docksmith/api/deps.py` handles database ping exceptions, whic
 ### One thing that went wrong today, and how I fixed it
 
 Running `scripts/fetch.py repo` initially failed because the directory `data/raw/docker-docs` already existed from the HTTP URL download. I updated the source name in `data/sources.csv` to `docker-website` so web pages and git repository files stay isolated in distinct subdirectories without name collision.
+
+## D07 · Parser comparison
+
+<!-- parsers:start -->
+| File | Parsers (A / B) | Pages | A found | B found | Time (A / B) | Better, why |
+|---|---|---|---|---|---|---|
+| dockerfile-6ca35cbd.html | trafilatura / strip tags | 40 | 109,355 chars, 90 headings, 13 tables | 121,232 chars, 104 headings, 0 tables | 0.27 s / 0.02 s | trafilatura: extracts 13 clean Markdown tables and removes ~12KB nav boilerplate |
+| volumes-ea5bbea4.html | trafilatura / strip tags | 10 | 25,280 chars, 33 headings, 2 tables | 39,071 chars, 0 headings, 0 tables | 0.06 s / 0.01 s | trafilatura: keeps 33 structural headings and 2 tables; strip tags collapsed to 0 headings |
+| best-practices-3cbb6d8f.html | trafilatura / strip tags | 11 | 29,506 chars, 29 headings, 0 tables | 40,951 chars, 12 headings, 0 tables | 0.04 s / 0.01 s | trafilatura: strips 11KB header/nav junk and preserves 29 section headings |
+| bind-mounts-3db617b7.html | trafilatura / strip tags | 6 | 16,241 chars, 14 headings, 4 tables | 29,529 chars, 0 headings, 0 tables | 0.03 s / 0.00 s | trafilatura: produces 4 Markdown tables and 14 clean headings; strip tags loses table layout |
+| optimize-c53a9295.html | trafilatura / strip tags | 5 | 12,555 chars, 7 headings, 0 tables | 23,766 chars, 4 headings, 0 tables | 0.03 s / 0.00 s | trafilatura: drops 11KB irrelevant nav links; keeps 7 core build cache headings |
+| tmpfs-1e363cba.html | trafilatura / strip tags | 3 | 7,696 chars, 7 headings, 2 tables | 20,812 chars, 0 headings, 0 tables | 0.02 s / 0.00 s | trafilatura: extracts 2 structured tables with exact parameters; strip tags flattens them |
+| multi-stage-341ad40b.html | trafilatura / strip tags | 3 | 6,064 chars, 6 headings, 0 tables | 18,596 chars, 4 headings, 0 tables | 0.04 s / 0.00 s | trafilatura: extracts 6 clear headings and eliminates 12KB navigation noise |
+| cache-98bb87ae.html | trafilatura / strip tags | 1 | 1,525 chars, 2 headings, 0 tables | 12,774 chars, 1 headings, 0 tables | 0.01 s / 0.00 s | trafilatura: accurately captures concise guide content; strip tags had 11KB template fluff |
+| compose-file-54b15924.html | trafilatura / strip tags | 1 | 997 chars, 0 headings, 0 tables | 11,123 chars, 0 headings, 0 tables | 0.01 s / 0.00 s | trafilatura: cleans overview prose; strip tags diluted content with 10KB nav links |
+| 04-version-and-name-eb4e3746.html | trafilatura / strip tags | 1 | 1,263 chars, 2 headings, 0 tables | 11,079 chars, 0 headings, 0 tables | 0.01 s / 0.00 s | trafilatura: retains 2 key version deprecation headings without header/footer noise |
+<!-- parsers:end -->
+
+### D07 · Parsing my corpus
+
+- Files in the manifest: 236 · parsed: 236 · failed: 0 · pages in Postgres: 632
+- Parsing coverage: 100 % of files
+
+### Failures by reason
+
+| Reason | Files | What I did |
+|---|---|---|
+| (none) | 0 | All 236 files parsed cleanly into documents and pages with zero failures |
+
+- The one I fixed: file (none: 0 failures across 236 files) , reason (clean corpus) , fix: verified parser robustness across all Markdown and HTML files
+
+### What I saw when I read my parsed pages
+
+- A page where the heading path is right (document, page, path): File overrides, Page 4, ["File overrides", "Command line", "Override resource limits"]
+- Something that came out wrong (document, page, what): File overrides, Page 1, YAML frontmatter (`--- title: ... ---`) was preserved in page 1 raw text
+- A table: Markdown grid or loose text? (document, page): Dockerfile reference, Page 15, clean Markdown grid (`| Instruction | Description |`)
+
+### My parser choice
+
+- For PDFs I use PyMuPDF because it detects font sizes to infer hierarchical heading levels and extracts ruled tables into Markdown, whereas pypdf yields plain text without table or heading structure.
+- A kind of document in my corpus that neither parser handles well: Multi-column reference tables embedded within raw HTML blocks that lack clear semantic table tags.
+
+### One thing that went wrong today, and how I fixed it
+
+Local `.env` initially had the local compose URL (`postgresql://app:app@localhost:5432/app` # pragma: allowlist secret) which caused connection errors during `alembic upgrade head`. I updated `.env` with the project's Neon PostgreSQL connection string so migrations and corpus parsing store pages directly into the remote database.
