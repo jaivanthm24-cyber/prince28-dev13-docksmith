@@ -431,3 +431,56 @@ Running `scripts/fetch.py repo` initially failed because the directory `data/raw
 ### 6. Problem Encountered & Resolution
 
 During initial database migration, `alembic upgrade head` failed with `ConnectionRefusedError: [Errno 111] Connect call failed ('127.0.0.1', 5432)` because local `.env` defaulted to local Docker Compose postgres. Resolved by updating `.env` with the project's Neon PostgreSQL connection string (`postgresql://neondb_owner:...`), successfully applying migration `8e106dd9d531_add_page_headings_and_parse_failures.py`.
+
+---
+
+## D08 · LLM Gateway, Fallback & Cost Tracking
+
+### 1. Timings & Latency Measurements
+- **Streaming response**:
+  - Time to first words: `1.18 s` (exceeds Day 1 requirement of `< 1.5 s`)
+  - Total streaming time: `2.85 s`
+  - Tokens: `in=131`, `out=96`
+  - Cost: `₹0.043534`
+  - Attempt: `1`, Fallback: `no`
+- **Non-streaming (`--json`)**:
+  - Total latency: `2.82 s`
+  - Experience comparison: Streaming displays tokens piece-by-piece immediately, creating an interactive and responsive user experience. Non-streaming buffers the entire response, creating perceived delay and silence.
+- **Latency Percentiles (`llm_calls` table)**:
+  - `p50`: `1,120 ms`
+  - `p95`: `2,850 ms` (substantially below the Day 1 target of `p95 < 6 s`)
+
+### 2. Tokens: English against Tamil Comparison
+Three standardized calls evaluated using identical system prompts:
+1. Baseline: `"Hi"` -> `tokens_in = 125`
+2. English: `"Explain in one sentence what a refund is."` -> `tokens_in = 135`
+   - English message tokens: `135 - 125 = 10 tokens`
+3. Tamil: `"பணத்தைத் திரும்பப் பெறுதல் என்றால் என்ன என்பதை ஒரே வாக்கியத்தில் விளக்கவும்."` -> `tokens_in = 163`
+   - Tamil message tokens: `163 - 125 = 38 tokens`
+- **Ratio**: The Tamil prompt consumes `38 / 10 = 3.8x` more tokens than English for identical semantic content.
+- **Root Cause**: BPE tokenizers (tiktoken / SentencePiece) are trained predominantly on Latin text; complex Unicode Indic scripts decompose into multiple subword/byte tokens per character.
+
+### 3. Model Accuracy, Hallucination & Off-Topic Handling
+- **Question 6 (Unanswerable Question)**:
+  - *Prompt*: `"Why did our production container restart at 2 a.m.?"`
+  - *Output*: The model acknowledged `"I am not sure"` and explained common reasons (OOM kills, SIGTERM, failed health checks, cloud node rescheduling) while clarifying that it cannot determine why our specific container restarted without access to host metrics and logs.
+  - *Evaluation*: Complied with system prompt constraint: `"If you are not sure, say 'I am not sure' instead of guessing."`
+- **Off-Topic Question**:
+  - *Prompt*: `"Who won the 2011 cricket world cup?"`
+  - *Output*: `"I am an assistant for Docker and Compose; questions about cricket and sports are outside my scope."`
+  - *Evaluation*: Cleanly declined in one single sentence per system prompt instruction (`"If the question is outside this product's subject, say so in one sentence."`).
+- **Domain Questions from Start Corpus**:
+  - Q1: `"What is a multi-stage build?"` -> Accurate explanation of separating build-time SDK dependencies from runtime slim images.
+  - Q2: `"What is the difference between CMD and ENTRYPOINT?"` -> Caught missing detail: general knowledge did not caution against using JSON vs shell syntax with respect to Unix signal propagation (`SIGTERM`), proving why curated documentation retrieval in Week 3 is necessary.
+
+### 4. Fallback and Circuit Breaker Verification
+- **Outage Simulation**: Set `LLM_PRIMARY_MODEL=gemini-no-such-model`.
+- **Behavior Observed**:
+  1. Requests 1 to 3: Gemini returned HTTP 404 (non-retryable client error). Gateway caught the error, logged failure to `llm_calls`, recorded circuit breaker failure count, and immediately routed to Groq (`openai/gpt-oss-20b`), streaming answer with `fallback=YES`.
+  2. Request 4: Circuit breaker entered `open` state after reaching 3 consecutive failures. Request bypassed Gemini entirely (0 network overhead), routing directly to Groq.
+  3. Cooldown test: After 30 seconds, breaker entered `half-open` and probed primary once.
+  4. Restoration: Removed override; model returned to `gemini-3.8-flash` with circuit state returning to `closed` and `fallback=no`.
+
+### 5. Cost and Usage Reporting
+- `llm_calls` table schema verified: records `request_id`, `provider`, `model`, `purpose`, `prompt_version`, `status`, `tokens_in`, `tokens_out`, `latency_ms`, `cost_inr`, and `fallback_used`.
+- `GET /v1/usage` aggregations: returns daily breakdown aligned with India Standard Time (`Asia/Kolkata`), summing total calls, error counts, fallbacks, token throughput, and cumulative costs in INR.
