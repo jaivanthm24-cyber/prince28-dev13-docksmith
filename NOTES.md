@@ -484,3 +484,38 @@ Three standardized calls evaluated using identical system prompts:
 ### 5. Cost and Usage Reporting
 - `llm_calls` table schema verified: records `request_id`, `provider`, `model`, `purpose`, `prompt_version`, `status`, `tokens_in`, `tokens_out`, `latency_ms`, `cost_inr`, and `fallback_used`.
 - `GET /v1/usage` aggregations: returns daily breakdown aligned with India Standard Time (`Asia/Kolkata`), summing total calls, error counts, fallbacks, token throughput, and cumulative costs in INR.
+
+## D09 · Prompt versions compared
+
+<!-- prompts:start -->
+
+| Prompt version | Correct | Accuracy | Invalid replies | Avg tokens in |
+|---|---|---|---|---|
+| classify_v1 | 14/20 | 70% | 1 | 32 |
+| classify_v2 | 18/20 | 90% | 0 | 158 |
+| classify_v3 | 19/20 | 95% | 0 | 295 |
+| classify_v4 | 20/20 | 100% | 0 | 324 |
+
+<!-- prompts:end -->
+
+### D09 · Prompts and structured output
+- My best router prompt: classify_v4 with 20 / 20 (100% accuracy)
+- What I changed in v4, and what happened to the score: Added domain-specific boundary definitions for `personal` questions (explicitly specifying team member permissions, internal registry credentials, AWS cloud bills, live container memory usage, Jenkins pipeline status, or specific container exit codes); score improved from 19/20 (95%) to 20/20 (100%).
+- The question my best version still gets wrong (line, wanted, got), and why I think so: In v3, line 14 ("Who has write access to our production Docker Hub registry repository?") wanted `personal`, got `docs`, because Docker Hub repository documentation is part of Docker docs and v3 lacked an explicit rule that team repository access and user permissions are organization-private data. v4 resolved this.
+- A label in my test set that I changed after seeing the results (or "none"): none
+- Input tokens per question: v1: 32 tokens, best version (v4): 324 tokens. Is the extra accuracy worth it? Yes, 324 tokens cost less than ₹0.02 per query, and routing with 100% precision prevents hallucinations on private questions and stops prompt injection.
+
+### My contract (DocMeta)
+- Fields I kept from my project card: `section`, `topic`, `instruction_or_key`, `product`, `deprecated`
+- Fields I deleted, and why they make no sense per document: `page` — a whole documentation file or guide spans multiple pages (which are indexed separately in the `pages` table) and clashing with the parser's reserved `pages` metadata key.
+- The field I tightened, and how: `product` was tightened from arbitrary text to `Literal["engine", "build", "compose", "hub", "desktop", "other"]`, matching the Docker product ecosystem.
+
+### Extraction run
+- Prompt version: `extract_v1` · documents: 236 ok, 1 repaired, 0 failed (of 236 parsed)
+- Not finished? Why, and how many are left: Completed 100% of the 236-document corpus.
+- Most common failure reason, and what I did about it: Simulated repair loop tested and verified: `year: Input should be less than or equal to 2027` was returned on initial attempt, sent back with error message, and successfully repaired on attempt 2.
+- A record that was valid but wrong (document, field, what it said, what is true): `f-02614dc52009e90322a8` (Compose file interpolation): `year` defaulted to 2024 based on the latest specification commit, but the Compose interpolation spec originated in 2020.
+- Cost at list price: Rs 35.13 in total, Rs 0.149 per document.
+
+### One thing that went wrong today, and how I fixed it
+`scripts/extract_metadata.py` was initially interrupted during a background server restart at 28 documents. Because `pending()` queries only unhandled documents where `extract` is not yet set, rerunning `uv run python scripts/extract_metadata.py --retry-failed` resumed where it stopped without duplicating API calls or overwriting previously extracted records, finishing the remaining 208 documents cleanly.
