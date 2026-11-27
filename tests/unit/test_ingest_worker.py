@@ -89,3 +89,61 @@ async def test_a_missing_file_is_downloaded_and_errors_are_sorted_into_two_kinds
         blocked = record(4, url="https://x.test/private/4.pdf")
         with pytest.raises(Permanent, match="robots"):
             await get_file(blocked, tmp_path, client, no_sleep)
+
+
+def test_sha256_of(tmp_path):
+    import hashlib
+
+    from docksmith.workers.ingest import sha256_of
+
+    f = tmp_path / "hello.txt"
+    f.write_bytes(b"hello world")
+    expected = hashlib.sha256(b"hello world").hexdigest()
+    assert sha256_of(f) == expected
+
+
+@pytest.mark.asyncio
+async def test_ingest_document_unknown_or_already_done():
+    from unittest.mock import AsyncMock, MagicMock
+
+    from docksmith.workers.ingest import ingest_document
+
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=None)
+    mock_sessionmaker = MagicMock(return_value=mock_session)
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock()
+
+    settings = MagicMock()
+    settings.ingest_max_tries = 3
+    ctx = {"settings": settings, "sessionmaker": mock_sessionmaker}
+
+    res = await ingest_document(ctx, 999)
+    assert res == "ignored"
+
+
+@pytest.mark.asyncio
+async def test_ingest_document_exceeds_max_tries():
+    from unittest.mock import AsyncMock, MagicMock
+
+    from docksmith.workers.ingest import ingest_document
+
+    mock_item = MagicMock()
+    mock_item.status = "queued"
+    mock_item.attempts = 3
+
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=mock_item)
+    mock_session.commit = AsyncMock()
+    mock_sessionmaker = MagicMock(return_value=mock_session)
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock()
+
+    settings = MagicMock()
+    settings.ingest_max_tries = 3
+    ctx = {"settings": settings, "sessionmaker": mock_sessionmaker}
+
+    res = await ingest_document(ctx, 123)
+    assert res == "failed"
+    assert mock_item.status == "failed"
+    assert "started 3 times" in mock_item.error
