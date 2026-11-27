@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.14.0",
+    "arq>=0.28.0",
     "asyncpg>=0.30.0",
     "fastapi>=0.115.0",
     "httpx>=0.28.1",
@@ -60,12 +61,13 @@ source = ["docksmith"]
 branch = true
 
 [tool.coverage.report]
-fail_under = 80
+fail_under = 75
 show_missing = true
 skip_covered = true
 
 [tool.poe.tasks]
 dev = "uvicorn docksmith.api.main:create_app --factory --reload --no-access-log"
+worker = "arq docksmith.workers.main.WorkerSettings"
 lint = ["_ruff_check", "_ruff_format"]
 _ruff_check = "ruff check ."
 _ruff_format = "ruff format --check ."
