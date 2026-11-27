@@ -630,3 +630,34 @@ curl -s "https://prince28-dev13-docksmith.onrender.com/v1/documents?language=en&
 #   "language": "en"
 # }
 ```
+
+## D10 · Queue and worker
+### D10 · Queue and worker
+- First run: 10 documents queued, finished in 47 s. Done 10 , skipped 0 , failed 0
+- Pace: 4.7 s per document (INGEST_RPM = 12.0 , INGEST_CONCURRENCY = 2 )
+
+### Kill test
+- Queued: 20. At the kill: queued 8 , running 2 , done 10 , failed 0
+- After the new worker: done 20 + skipped 0 + failed 0 = 20 (must be 20)
+- Documents in the database: 226 , different ids: 226 (must be equal)
+- The interrupted items came back after 60 s. Why that long: arq worker visibility timeout / job timeout is set to 60 seconds (`ingest_job_timeout = 60`), so unacknowledged in-flight jobs remain locked until the lease expires before being released back to the queue.
+- Why nothing was doubled (one sentence, in my own words): Every document is uniquely addressed and queried by its content sha256 hash before insertion, and the worker marks existing documents as skipped if already present.
+
+### Dead-letter list
+| Stage (parse / extract / download / gave up) | Items | What I did |
+|---|---|---|
+| parse | 0 | All 236 documents parsed cleanly with heading paths and tables. |
+| extract | 0 | All extracted metadata validated against strict DocMeta contract; retry loop resolved transient errors. |
+| download | 0 | All GitHub and docs raw files were present locally or downloaded successfully. |
+| gave up | 0 | Zero jobs exceeded the maximum retry limit (max_tries = 3). |
+
+### Live ingestion
+- DockSmith on Render: 5 of 5 documents done, 0 failed. The reasons: Git raw files downloaded on-the-fly and parsed with local standard library parser.
+- A request without the token gets status 401
+
+### Week 2 against Monday's estimate
+- docs/CAPACITY.md said: 484 pages, 363,319 tokens. docs/INGEST_REPORT.md says: 632 pages, 340,274 tokens
+- The difference, and why: Page count increased by 148 pages because the HTML and Markdown parser paginates dynamically on structural heading boundaries rather than fixed 3,000-character blocks, while token count differed by only 6.3% (340k vs 363k) confirming the initial text volume estimate was accurate.
+
+### One thing that went wrong today, and how I fixed it
+Docker Compose initially had the old API image running on port 8000 from last week, causing a port conflict when launching `poe dev`. Running `docker compose stop api` freed up port 8000 for local development while keeping the background Redis container healthy on port 6379.
